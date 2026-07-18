@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "deploy": "npm run build && gh-pages -d dist"
+    "deploy": "npm run build && gh-pages -d dist -r https://github.com/kashyap21/kashyap21.github.io.git -b gh-pages -f"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.7",
