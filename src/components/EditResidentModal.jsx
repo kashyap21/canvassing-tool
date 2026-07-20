@@ -8,46 +8,54 @@ const SUPPORTER_CHOICES = [
 ];
 
 const NA_FIELDS = ["first_name", "last_name", "cell_number", "email"];
-
-const EMPTY = {
-  street_number: "",
-  street_name: "",
-  unit_no: "",
-  first_name: "",
-  last_name: "",
-  cell_number: "",
-  email: "",
-  supporter: "unknown",
-  number_of_votes: 1,
-  lawn_sign: false,
-  newsletter_consent: false,
-  comments: "",
-};
-
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export default function ResidentForm({ streets, stats, recent, onSaved }) {
-  const [values, setValues] = useState(EMPTY);
-  const [nameNa, setNameNa] = useState(false);
+// Only these columns are user-editable; id / created_at are left untouched.
+const EDITABLE = [
+  "street_number",
+  "street_name",
+  "unit_no",
+  "first_name",
+  "last_name",
+  "cell_number",
+  "email",
+  "supporter",
+  "number_of_votes",
+  "lawn_sign",
+  "newsletter_consent",
+  "comments",
+];
+
+function toForm(resident) {
+  const v = {};
+  for (const k of EDITABLE) {
+    const raw = resident[k];
+    v[k] = raw == null ? (k === "number_of_votes" ? 0 : "") : raw;
+  }
+  return v;
+}
+
+export default function EditResidentModal({ resident, streets, onClose, onSaved }) {
+  const [values, setValues] = useState(() => toForm(resident));
+  const [nameNa, setNameNa] = useState(resident.first_name === "N/A");
   const [errors, setErrors] = useState({});
-  const [flash, setFlash] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Live street type-ahead: refine the <datalist> from the DB as the user types.
-  const [streetOptions, setStreetOptions] = useState(streets);
-  useEffect(() => setStreetOptions(streets), [streets]);
-
+  // Re-seed the form if a different resident is opened without unmounting.
   useEffect(() => {
-    const q = values.street_name.trim().toLowerCase();
-    if (q.length < 2) {
-      setStreetOptions(streets);
-      return;
-    }
-    const timer = setTimeout(() => {
-      setStreetOptions(streets.filter((s) => s.toLowerCase().includes(q)).slice(0, 10));
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [values.street_name, streets]);
+    setValues(toForm(resident));
+    setNameNa(resident.first_name === "N/A");
+    setErrors({});
+  }, [resident]);
+
+  // Close on Escape for keyboard users.
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   function set(field, value) {
     setValues((v) => ({ ...v, [field]: value }));
@@ -56,7 +64,6 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
   function toggleNa(checked) {
     setNameNa(checked);
     if (checked) {
-      // Stamp name / phone / email with "N/A" and clear any errors on them.
       setValues((v) => ({ ...v, first_name: "N/A", last_name: "N/A", cell_number: "N/A", email: "N/A" }));
       setErrors((e) => {
         const next = { ...e };
@@ -76,13 +83,13 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
 
   function validate() {
     const e = {};
-    if (!values.street_number.trim()) e.street_number = "This field is required.";
-    if (!values.street_name.trim()) e.street_name = "This field is required.";
+    if (!String(values.street_number).trim()) e.street_number = "This field is required.";
+    if (!String(values.street_name).trim()) e.street_name = "This field is required.";
     if (!nameNa) {
-      if (!values.first_name.trim()) e.first_name = "This field is required.";
-      if (!values.last_name.trim()) e.last_name = "This field is required.";
-      if (!values.cell_number.trim()) e.cell_number = "This field is required.";
-      if (values.email.trim() && !EMAIL_RE.test(values.email.trim()))
+      if (!String(values.first_name).trim()) e.first_name = "This field is required.";
+      if (!String(values.last_name).trim()) e.last_name = "This field is required.";
+      if (!String(values.cell_number).trim()) e.cell_number = "This field is required.";
+      if (String(values.email).trim() && !EMAIL_RE.test(String(values.email).trim()))
         e.email = "Enter a valid email address.";
     }
     if (values.number_of_votes === "" || Number(values.number_of_votes) < 0)
@@ -92,7 +99,6 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
 
   async function submit(ev) {
     ev.preventDefault();
-    setFlash("");
     const found = validate();
     setErrors(found);
     if (Object.keys(found).length) return;
@@ -101,92 +107,80 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
     const payload = {
       ...values,
       number_of_votes: Number(values.number_of_votes) || 0,
-      // N/A path: force the four fields regardless of what's shown.
       ...(nameNa ? { first_name: "N/A", last_name: "N/A", cell_number: "N/A", email: "N/A" } : {}),
     };
 
-    const { error } = await supabase.from("residents").insert(payload);
+    const { data, error } = await supabase
+      .from("residents")
+      .update(payload)
+      .eq("id", resident.id)
+      .select()
+      .single();
     setSaving(false);
 
     if (error) {
-      setFlash("");
       setErrors({ _form: error.message });
       return;
     }
 
-    setFlash(`Saved ${payload.first_name} ${payload.last_name}.`);
-    setValues(EMPTY);
-    setNameNa(false);
-    setErrors({});
-    onSaved(); // refresh streets / stats / recent
-    // Return focus to the first field for fast repeat entry.
-    document.getElementById("street_number")?.focus();
+    onSaved(data);
   }
 
   return (
-    <>
-      <div className="card">
-        <header className="card-head">
-          <h1>Add a Resident</h1>
-          <p className="sub">Fill in what you learned at the door. Only email is optional.</p>
+    <div className="modal-overlay" onMouseDown={onClose}>
+      <div
+        className="modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Edit resident"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <header className="modal-head">
+          <h2>Edit resident</h2>
+          <button type="button" className="modal-close" aria-label="Close" onClick={onClose}>
+            ✕
+          </button>
         </header>
 
-        {flash && <div className="flash flash-success">✓ {flash}</div>}
         {errors._form && <div className="flash flash-error">{errors._form}</div>}
-
-        <div className="stats">
-          <div className="stat">
-            <span className="stat-num">{stats.total_residents}</span>
-            <span className="stat-label">Residents</span>
-          </div>
-          <div className="stat">
-            <span className="stat-num">{stats.total_votes}</span>
-            <span className="stat-label">Votes</span>
-          </div>
-        </div>
 
         <form className="form-grid" onSubmit={submit} noValidate>
           <div className="field field-narrow">
-            <label htmlFor="street_number">Street number</label>
+            <label htmlFor="e_street_number">Street number</label>
             <input
-              id="street_number"
+              id="e_street_number"
               type="text"
               inputMode="numeric"
-              placeholder="e.g. 123"
-              autoFocus
               value={values.street_number}
               onChange={(e) => set("street_number", e.target.value)}
             />
             {errors.street_number && <span className="err">{errors.street_number}</span>}
           </div>
           <div className="field">
-            <label htmlFor="street_name">Street name</label>
+            <label htmlFor="e_street_name">Street name</label>
             <input
-              id="street_name"
+              id="e_street_name"
               type="text"
-              list="street-options"
+              list="edit-street-options"
               autoComplete="off"
-              placeholder="e.g. Maple Street"
               value={values.street_name}
               onChange={(e) => set("street_name", e.target.value)}
             />
-            <datalist id="street-options">
-              {streetOptions.map((s) => (
+            <datalist id="edit-street-options">
+              {(streets || []).map((s) => (
                 <option value={s} key={s} />
               ))}
             </datalist>
-            <span className="hint">Start typing — streets you entered before will appear.</span>
             {errors.street_name && <span className="err">{errors.street_name}</span>}
           </div>
 
           <div className="field col-full">
-            <label htmlFor="unit_no">
+            <label htmlFor="e_unit_no">
               Unit no. <span className="opt">(optional)</span>
             </label>
             <input
-              id="unit_no"
+              id="e_unit_no"
               type="text"
-              placeholder="Apt / unit (optional)"
               value={values.unit_no}
               onChange={(e) => set("unit_no", e.target.value)}
             />
@@ -198,11 +192,10 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
           </label>
 
           <div className="field">
-            <label htmlFor="first_name">First name</label>
+            <label htmlFor="e_first_name">First name</label>
             <input
-              id="first_name"
+              id="e_first_name"
               type="text"
-              placeholder="First name"
               className={nameNa ? "is-na" : ""}
               readOnly={nameNa}
               value={values.first_name}
@@ -211,11 +204,10 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
             {errors.first_name && <span className="err">{errors.first_name}</span>}
           </div>
           <div className="field">
-            <label htmlFor="last_name">Last name</label>
+            <label htmlFor="e_last_name">Last name</label>
             <input
-              id="last_name"
+              id="e_last_name"
               type="text"
-              placeholder="Last name"
               className={nameNa ? "is-na" : ""}
               readOnly={nameNa}
               value={values.last_name}
@@ -225,12 +217,11 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
           </div>
 
           <div className="field">
-            <label htmlFor="cell_number">Cell number</label>
+            <label htmlFor="e_cell_number">Cell number</label>
             <input
-              id="cell_number"
+              id="e_cell_number"
               type="tel"
               inputMode="tel"
-              placeholder="(555) 123-4567"
               className={nameNa ? "is-na" : ""}
               readOnly={nameNa}
               value={values.cell_number}
@@ -239,13 +230,12 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
             {errors.cell_number && <span className="err">{errors.cell_number}</span>}
           </div>
           <div className="field">
-            <label htmlFor="email">
+            <label htmlFor="e_email">
               Email <span className="opt">(optional)</span>
             </label>
             <input
-              id="email"
+              id="e_email"
               type="email"
-              placeholder="name@example.com (optional)"
               className={nameNa ? "is-na" : ""}
               readOnly={nameNa}
               value={values.email}
@@ -261,7 +251,7 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
                 <label className="radio-pill" key={val}>
                   <input
                     type="radio"
-                    name="supporter"
+                    name="edit-supporter"
                     value={val}
                     checked={values.supporter === val}
                     onChange={(e) => set("supporter", e.target.value)}
@@ -273,9 +263,9 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
           </div>
 
           <div className="field">
-            <label htmlFor="number_of_votes">Number of votes</label>
+            <label htmlFor="e_number_of_votes">Number of votes</label>
             <input
-              id="number_of_votes"
+              id="e_number_of_votes"
               type="number"
               min="0"
               step="1"
@@ -294,7 +284,7 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
             <span className="switch">
               <input
                 type="checkbox"
-                checked={values.lawn_sign}
+                checked={!!values.lawn_sign}
                 onChange={(e) => set("lawn_sign", e.target.checked)}
               />
               <span className="slider" />
@@ -309,7 +299,7 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
             <span className="switch">
               <input
                 type="checkbox"
-                checked={values.newsletter_consent}
+                checked={!!values.newsletter_consent}
                 onChange={(e) => set("newsletter_consent", e.target.checked)}
               />
               <span className="slider" />
@@ -317,45 +307,27 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
           </label>
 
           <div className="field col-full">
-            <label htmlFor="comments">
+            <label htmlFor="e_comments">
               Other comments <span className="opt">(optional)</span>
             </label>
             <textarea
-              id="comments"
-              rows="6"
-              placeholder="Anything else worth noting (optional)"
+              id="e_comments"
+              rows="4"
               value={values.comments}
               onChange={(e) => set("comments", e.target.value)}
             />
           </div>
 
-          <button type="submit" className="save col-full" disabled={saving}>
-            {saving ? "Saving…" : "Save resident"}
-          </button>
+          <div className="modal-actions col-full">
+            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? "Saving…" : "Save changes"}
+            </button>
+          </div>
         </form>
       </div>
-
-      {recent.length > 0 && (
-        <div className="card recent">
-          <h2>Recently added</h2>
-          <ul>
-            {recent.map((r) => (
-              <li key={r.id}>
-                <span className="r-name">
-                  {r.first_name} {r.last_name}
-                </span>
-                <span className="r-addr">
-                  {r.street_number} {r.street_name}
-                  {r.unit_no ? ` · #${r.unit_no}` : ""}
-                </span>
-                <span className="r-votes">
-                  {r.number_of_votes} vote{r.number_of_votes === 1 ? "" : "s"}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-    </>
+    </div>
   );
 }

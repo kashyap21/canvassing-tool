@@ -50,7 +50,7 @@ export default function App() {
 
   if (!isConfigured) {
     return (
-      <main className="page">
+      <main className="page page-narrow">
         <div className="card">
           <header className="card-head">
             <h1>Set up Supabase</h1>
@@ -67,7 +67,7 @@ export default function App() {
 
   if (!ready) {
     return (
-      <main className="page">
+      <main className="page page-narrow">
         <div className="card">
           <p className="sub">Loading…</p>
         </div>
@@ -77,7 +77,7 @@ export default function App() {
 
   if (!session) {
     return (
-      <main className="page">
+      <main className="page page-narrow">
         <Login />
       </main>
     );

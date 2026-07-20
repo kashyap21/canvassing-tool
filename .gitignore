@@ -4,3 +4,6 @@ dist/
 .env.local
 *.log
 .DS_Store
+
+# Local data imports with resident PII — keep out of this public repo
+supabase/*import*.sql
