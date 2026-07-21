@@ -80,8 +80,7 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
     if (!values.street_name.trim()) e.street_name = "This field is required.";
     if (!nameNa) {
       if (!values.first_name.trim()) e.first_name = "This field is required.";
-      if (!values.last_name.trim()) e.last_name = "This field is required.";
-      if (!values.cell_number.trim()) e.cell_number = "This field is required.";
+      // Last name, cell number and email are optional.
       if (values.email.trim() && !EMAIL_RE.test(values.email.trim()))
         e.email = "Enter a valid email address.";
     }
@@ -128,7 +127,7 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
       <div className="card">
         <header className="card-head">
           <h1>Add a Resident</h1>
-          <p className="sub">Fill in what you learned at the door. Only email is optional.</p>
+          <p className="sub">Fill in what you learned at the door. Only the address and first name are required.</p>
         </header>
 
         {flash && <div className="flash flash-success">✓ {flash}</div>}
@@ -211,7 +210,9 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
             {errors.first_name && <span className="err">{errors.first_name}</span>}
           </div>
           <div className="field">
-            <label htmlFor="last_name">Last name</label>
+            <label htmlFor="last_name">
+              Last name <span className="opt">(optional)</span>
+            </label>
             <input
               id="last_name"
               type="text"
@@ -225,7 +226,9 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
           </div>
 
           <div className="field">
-            <label htmlFor="cell_number">Cell number</label>
+            <label htmlFor="cell_number">
+              Cell number <span className="opt">(optional)</span>
+            </label>
             <input
               id="cell_number"
               type="tel"

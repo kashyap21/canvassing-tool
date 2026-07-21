@@ -87,8 +87,7 @@ export default function EditResidentModal({ resident, streets, onClose, onSaved 
     if (!String(values.street_name).trim()) e.street_name = "This field is required.";
     if (!nameNa) {
       if (!String(values.first_name).trim()) e.first_name = "This field is required.";
-      if (!String(values.last_name).trim()) e.last_name = "This field is required.";
-      if (!String(values.cell_number).trim()) e.cell_number = "This field is required.";
+      // Last name, cell number and email are optional here.
       if (String(values.email).trim() && !EMAIL_RE.test(String(values.email).trim()))
         e.email = "Enter a valid email address.";
     }
@@ -204,7 +203,9 @@ export default function EditResidentModal({ resident, streets, onClose, onSaved 
             {errors.first_name && <span className="err">{errors.first_name}</span>}
           </div>
           <div className="field">
-            <label htmlFor="e_last_name">Last name</label>
+            <label htmlFor="e_last_name">
+              Last name <span className="opt">(optional)</span>
+            </label>
             <input
               id="e_last_name"
               type="text"
@@ -217,7 +218,9 @@ export default function EditResidentModal({ resident, streets, onClose, onSaved 
           </div>
 
           <div className="field">
-            <label htmlFor="e_cell_number">Cell number</label>
+            <label htmlFor="e_cell_number">
+              Cell number <span className="opt">(optional)</span>
+            </label>
             <input
               id="e_cell_number"
               type="tel"
