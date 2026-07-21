@@ -12,10 +12,10 @@ create table if not exists public.residents (
     street_number   text        not null,
     street_name     text        not null,
     unit_no         text        not null default '',
-    first_name      text        not null,
-    last_name       text        not null,
-    cell_number     text        not null,
-    email           text        not null default '',
+    first_name      text        default '',
+    last_name       text        default '',
+    cell_number     text        default '',
+    email           text        default '',
     supporter       text        not null default 'unknown'
                         check (supporter in ('yes', 'no', 'unknown')),
     number_of_votes integer     not null default 1 check (number_of_votes >= 0),
@@ -29,6 +29,18 @@ create table if not exists public.residents (
 
 create index if not exists residents_street_name_idx on public.residents (street_name);
 create index if not exists residents_created_at_idx  on public.residents (created_at desc);
+
+-- Existing projects may still have these columns marked NOT NULL from an older
+-- schema. Keep contact details optional at the database layer too.
+alter table public.residents
+    alter column first_name drop not null,
+    alter column first_name set default '',
+    alter column last_name drop not null,
+    alter column last_name set default '',
+    alter column cell_number drop not null,
+    alter column cell_number set default '',
+    alter column email drop not null,
+    alter column email set default '';
 
 -- ---------------------------------------------------------------------------
 -- 2. Row Level Security

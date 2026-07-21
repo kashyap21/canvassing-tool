@@ -10,6 +10,7 @@ const PAGE_SIZES = [25, 50, 100, 200];
 // A resident is "N/A" when the canvasser ticked "No details given", which
 // stamps the name / phone / email fields with the literal "N/A".
 const isNa = (r) => r.first_name === "N/A";
+const residentName = (r) => [r.first_name, r.last_name].filter(Boolean).join(" ");
 
 // Fetch EVERY row, page by page, so filtering / export cover all 7000+.
 async function fetchAllResidents() {
@@ -233,7 +234,7 @@ export default function ResidentsList() {
             {pageRows.map((r) => (
               <tr key={r.id}>
                 <td>
-                  {r.first_name} {r.last_name}
+                  {residentName(r)}
                 </td>
                 <td>
                   {r.street_number} {r.street_name}

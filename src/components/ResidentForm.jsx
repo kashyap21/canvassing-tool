@@ -25,6 +25,7 @@ const EMPTY = {
 };
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const residentName = (r) => [r.first_name, r.last_name].filter(Boolean).join(" ");
 
 export default function ResidentForm({ streets, stats, recent, onSaved }) {
   const [values, setValues] = useState(EMPTY);
@@ -79,8 +80,7 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
     if (!values.street_number.trim()) e.street_number = "This field is required.";
     if (!values.street_name.trim()) e.street_name = "This field is required.";
     if (!nameNa) {
-      if (!values.first_name.trim()) e.first_name = "This field is required.";
-      // Last name, cell number and email are optional.
+      // Name, phone number and email are optional.
       if (values.email.trim() && !EMAIL_RE.test(values.email.trim()))
         e.email = "Enter a valid email address.";
     }
@@ -113,7 +113,9 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
       return;
     }
 
-    setFlash(`Saved ${payload.first_name} ${payload.last_name}.`);
+    const displayName = [payload.first_name, payload.last_name].filter(Boolean).join(" ").trim();
+    const displayAddress = [payload.street_number, payload.street_name].filter(Boolean).join(" ").trim();
+    setFlash(`Saved ${displayName || displayAddress || "resident"}.`);
     setValues(EMPTY);
     setNameNa(false);
     setErrors({});
@@ -127,7 +129,7 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
       <div className="card">
         <header className="card-head">
           <h1>Add a Resident</h1>
-          <p className="sub">Fill in what you learned at the door. Only the address and first name are required.</p>
+          <p className="sub">Fill in what you learned at the door. Only the address is required.</p>
         </header>
 
         {flash && <div className="flash flash-success">✓ {flash}</div>}
@@ -197,7 +199,9 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
           </label>
 
           <div className="field">
-            <label htmlFor="first_name">First name</label>
+            <label htmlFor="first_name">
+              First name <span className="opt">(optional)</span>
+            </label>
             <input
               id="first_name"
               type="text"
@@ -345,7 +349,7 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
             {recent.map((r) => (
               <li key={r.id}>
                 <span className="r-name">
-                  {r.first_name} {r.last_name}
+                  {residentName(r)}
                 </span>
                 <span className="r-addr">
                   {r.street_number} {r.street_name}
