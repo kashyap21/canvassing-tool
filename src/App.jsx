@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase, isConfigured } from "./supabaseClient";
+import HeaderStats from "./components/HeaderStats";
 import Login from "./components/Login";
 import ResidentForm from "./components/ResidentForm";
 import ResidentsList from "./components/ResidentsList";
+import { flushPendingResidents, getPendingResidentCount } from "./lib/offlineQueue";
 
 export default function App() {
   const [session, setSession] = useState(null);
@@ -13,6 +15,10 @@ export default function App() {
   const [streets, setStreets] = useState([]);
   const [stats, setStats] = useState({ total_residents: 0, total_votes: 0 });
   const [recent, setRecent] = useState([]);
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(getPendingResidentCount);
+  const [syncing, setSyncing] = useState(false);
+  const [dataRefreshKey, setDataRefreshKey] = useState(0);
 
   // Track the signed-in session (and react to sign-in / sign-out).
   useEffect(() => {
@@ -47,6 +53,67 @@ export default function App() {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  const refreshAll = useCallback(() => {
+    refresh();
+    setDataRefreshKey((key) => key + 1);
+  }, [refresh]);
+
+  useEffect(() => {
+    function updateStatus() {
+      setOnline(navigator.onLine);
+    }
+    function updateQueueCount() {
+      setPendingCount(getPendingResidentCount());
+    }
+
+    window.addEventListener("online", updateStatus);
+    window.addEventListener("offline", updateStatus);
+    window.addEventListener("resident-queue-changed", updateQueueCount);
+    return () => {
+      window.removeEventListener("online", updateStatus);
+      window.removeEventListener("offline", updateStatus);
+      window.removeEventListener("resident-queue-changed", updateQueueCount);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!session || view !== "data") return;
+
+    function refreshWhenVisible() {
+      if (navigator.onLine && document.visibilityState === "visible") refreshAll();
+    }
+
+    refreshWhenVisible();
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("online", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("online", refreshWhenVisible);
+    };
+  }, [refreshAll, session, view]);
+
+  useEffect(() => {
+    if (!session || !online || pendingCount === 0) return;
+
+    let cancelled = false;
+    setSyncing(true);
+    flushPendingResidents(supabase)
+      .then((result) => {
+        if (cancelled) return;
+        setPendingCount(result.remaining);
+        if (result.synced > 0) refreshAll();
+      })
+      .finally(() => {
+        if (!cancelled) setSyncing(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [online, pendingCount, refreshAll, session]);
 
   if (!isConfigured) {
     return (
@@ -100,15 +167,30 @@ export default function App() {
             Data
           </button>
         </div>
+        <HeaderStats stats={stats} />
         <button className="signout" onClick={() => supabase.auth.signOut()}>
           Sign out
         </button>
       </nav>
 
+      <div className={online ? "offline-status online" : "offline-status offline"}>
+        <span>{online ? "Online" : "Offline"}</span>
+        {pendingCount > 0 && (
+          <strong>
+            {syncing ? "Syncing" : "Pending"}: {pendingCount}
+          </strong>
+        )}
+      </div>
+
       {view === "add" ? (
-        <ResidentForm streets={streets} stats={stats} recent={recent} onSaved={refresh} />
+        <ResidentForm
+          streets={streets}
+          recent={recent}
+          onSaved={refreshAll}
+          online={online}
+        />
       ) : (
-        <ResidentsList />
+        <ResidentsList online={online} refreshKey={dataRefreshKey} />
       )}
     </main>
   );

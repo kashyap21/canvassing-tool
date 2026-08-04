@@ -15,5 +15,9 @@ if (!isConfigured) {
 }
 
 export const supabase = isConfigured
-  ? createClient(url, anonKey)
+  ? createClient(url, anonKey, {
+      global: {
+        fetch: (input, init) => fetch(input, { ...init, cache: "no-store" }),
+      },
+    })
   : null;

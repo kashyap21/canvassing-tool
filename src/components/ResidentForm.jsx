@@ -1,5 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
+import { isRetryableNetworkError, queueResident } from "../lib/offlineQueue";
+import { normalizeResidentPayload } from "../lib/normalizeResident";
+import { findAddressMatches, formatAddress, meaningful, normalizeStreetNumber } from "../lib/duplicates";
 
 const SUPPORTER_CHOICES = [
   ["yes", "Yes"],
@@ -27,12 +30,34 @@ const EMPTY = {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const residentName = (r) => [r.first_name, r.last_name].filter(Boolean).join(" ");
 
-export default function ResidentForm({ streets, stats, recent, onSaved }) {
+// Columns the duplicate check needs to describe a match back to the user.
+const DUP_FIELDS =
+  "id, street_number, street_name, unit_no, first_name, last_name, cell_number, supporter, number_of_votes, created_at";
+// Anything outside this set could carry LIKE wildcards, so match it exactly.
+const PLAIN_NUMBER_RE = /^[A-Za-z0-9\s/-]+$/;
+const NO_MATCHES = { exact: [], otherUnits: [] };
+
+function matchLabel(row) {
+  const name = residentName(row).trim();
+  const bits = [name || "no name recorded"];
+  if (row.supporter && row.supporter !== "unknown")
+    bits.push(`supporter: ${row.supporter === "yes" ? "yes" : "no"}`);
+  if (meaningful(row.cell_number)) bits.push(row.cell_number);
+  return bits.join(" · ");
+}
+
+export default function ResidentForm({ streets, recent, onSaved, online }) {
   const [values, setValues] = useState(EMPTY);
   const [nameNa, setNameNa] = useState(false);
   const [errors, setErrors] = useState({});
   const [flash, setFlash] = useState("");
   const [saving, setSaving] = useState(false);
+
+  // Live duplicate check on the address (feature request #3).
+  const [dup, setDup] = useState(NO_MATCHES);
+  const [dupChecking, setDupChecking] = useState(false);
+  const [dupBlocked, setDupBlocked] = useState(false);
+  const dupRequestRef = useRef(0);
 
   // Live street type-ahead: refine the <datalist> from the DB as the user types.
   const [streetOptions, setStreetOptions] = useState(streets);
@@ -49,6 +74,49 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
     }, 200);
     return () => clearTimeout(timer);
   }, [values.street_name, streets]);
+
+  // Ask the database whether this address is already recorded, ~1/3 s after the
+  // typist stops. Only rows with the same street number come back, so this stays
+  // a small query however big the table gets.
+  useEffect(() => {
+    const { street_number: number, street_name: name, unit_no: unit } = values;
+    const requestId = ++dupRequestRef.current;
+    setDupBlocked(false);
+
+    if (!online || !normalizeStreetNumber(number) || !name.trim()) {
+      setDup(NO_MATCHES);
+      setDupChecking(false);
+      return;
+    }
+
+    setDupChecking(true);
+    const timer = setTimeout(async () => {
+      const trimmed = number.trim();
+      const query = supabase.from("residents").select(DUP_FIELDS);
+      // ilike catches "12A" vs "12a"; a value with LIKE wildcards in it is
+      // matched literally instead.
+      const filtered = PLAIN_NUMBER_RE.test(trimmed)
+        ? query.ilike("street_number", trimmed)
+        : query.eq("street_number", trimmed);
+      const { data, error } = await filtered.limit(200);
+
+      if (requestId !== dupRequestRef.current) return; // a newer keystroke won
+      setDupChecking(false);
+      if (error) {
+        setDup(NO_MATCHES);
+        return;
+      }
+      setDup(
+        findAddressMatches(data || [], {
+          street_number: number,
+          street_name: name,
+          unit_no: unit,
+        }),
+      );
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [values.street_number, values.street_name, values.unit_no, online]);
 
   function set(field, value) {
     setValues((v) => ({ ...v, [field]: value }));
@@ -89,25 +157,53 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
     return e;
   }
 
-  async function submit(ev) {
+  async function submit(ev, { force = false } = {}) {
     ev.preventDefault();
     setFlash("");
     const found = validate();
     setErrors(found);
     if (Object.keys(found).length) return;
 
-    setSaving(true);
+    // First attempt on an address that already exists: stop and make the typist
+    // look at the matches. A second click ("Save anyway") goes through.
+    if (dup.exact.length && !force) {
+      setDupBlocked(true);
+      document.getElementById("dup-warning")?.scrollIntoView({ block: "center" });
+      return;
+    }
+
     const payload = {
-      ...values,
+      ...normalizeResidentPayload(values),
       number_of_votes: Number(values.number_of_votes) || 0,
       // N/A path: force the four fields regardless of what's shown.
       ...(nameNa ? { first_name: "N/A", last_name: "N/A", cell_number: "N/A", email: "N/A" } : {}),
     };
 
+    if (!online) {
+      queueResident(payload);
+      setFlash("Saved offline. It will sync automatically when this device is online.");
+      setValues(EMPTY);
+      setNameNa(false);
+      setErrors({});
+      document.getElementById("street_number")?.focus();
+      return;
+    }
+
+    setSaving(true);
     const { error } = await supabase.from("residents").insert(payload);
     setSaving(false);
 
     if (error) {
+      if (isRetryableNetworkError(error)) {
+        queueResident(payload);
+        setFlash("Saved offline. It will sync automatically when this device is online.");
+        setValues(EMPTY);
+        setNameNa(false);
+        setErrors({});
+        document.getElementById("street_number")?.focus();
+        return;
+      }
+
       setFlash("");
       setErrors({ _form: error.message });
       return;
@@ -134,17 +230,6 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
 
         {flash && <div className="flash flash-success">✓ {flash}</div>}
         {errors._form && <div className="flash flash-error">{errors._form}</div>}
-
-        <div className="stats">
-          <div className="stat">
-            <span className="stat-num">{stats.total_residents}</span>
-            <span className="stat-label">Residents</span>
-          </div>
-          <div className="stat">
-            <span className="stat-num">{stats.total_votes}</span>
-            <span className="stat-label">Votes</span>
-          </div>
-        </div>
 
         <form className="form-grid" onSubmit={submit} noValidate>
           <div className="field field-narrow">
@@ -192,6 +277,49 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
               onChange={(e) => set("unit_no", e.target.value)}
             />
           </div>
+
+          {dupChecking && dup.exact.length === 0 && (
+            <p className="dup-checking col-full">Checking for duplicates…</p>
+          )}
+
+          {dup.exact.length > 0 && (
+            <div
+              id="dup-warning"
+              className={dupBlocked ? "dup-alert col-full is-blocking" : "dup-alert col-full"}
+              role="alert"
+            >
+              <strong>
+                ⚠ This address is already in the system — {dup.exact.length} entr
+                {dup.exact.length === 1 ? "y" : "ies"} at {formatAddress(dup.exact[0])}
+              </strong>
+              <ul className="dup-list">
+                {dup.exact.slice(0, 6).map((r) => (
+                  <li key={r.id}>
+                    <span className="dup-who">{matchLabel(r)}</span>
+                    <span className="dup-when">{new Date(r.created_at).toLocaleDateString()}</span>
+                  </li>
+                ))}
+              </ul>
+              {dup.exact.length > 6 && <p className="dup-more">…and {dup.exact.length - 6} more.</p>}
+              <p className="dup-help">
+                {dupBlocked
+                  ? "If this really is a different person at the same address, use Save anyway."
+                  : "Only add this if it is a different person at the same address."}
+              </p>
+            </div>
+          )}
+
+          {dup.exact.length === 0 && dup.otherUnits.length > 0 && (
+            <p className="dup-note col-full">
+              {dup.otherUnits.length} other unit{dup.otherUnits.length === 1 ? "" : "s"} recorded at
+              this street address (
+              {dup.otherUnits
+                .slice(0, 6)
+                .map((r) => (meaningful(r.unit_no) ? `#${r.unit_no}` : "no unit"))
+                .join(", ")}
+              ).
+            </p>
+          )}
 
           <label className="na-check col-full">
             <input type="checkbox" checked={nameNa} onChange={(e) => toggleNa(e.target.checked)} />
@@ -336,9 +464,36 @@ export default function ResidentForm({ streets, stats, recent, onSaved }) {
             />
           </div>
 
-          <button type="submit" className="save col-full" disabled={saving}>
-            {saving ? "Saving…" : "Save resident"}
-          </button>
+          {dupBlocked ? (
+            <div className="save-row col-full">
+              <button
+                type="button"
+                className="save save-warn"
+                disabled={saving}
+                onClick={(e) => submit(e, { force: true })}
+              >
+                {saving ? "Saving…" : "Save anyway"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                disabled={saving}
+                onClick={() => {
+                  setDupBlocked(false);
+                  setValues(EMPTY);
+                  setNameNa(false);
+                  setErrors({});
+                  document.getElementById("street_number")?.focus();
+                }}
+              >
+                Skip this one
+              </button>
+            </div>
+          ) : (
+            <button type="submit" className="save col-full" disabled={saving}>
+              {saving ? "Saving…" : "Save resident"}
+            </button>
+          )}
         </form>
       </div>
 

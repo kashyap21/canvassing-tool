@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
+import { normalizeResidentPayload } from "../lib/normalizeResident";
 
 const SUPPORTER_CHOICES = [
   ["yes", "Yes"],
@@ -103,7 +104,7 @@ export default function EditResidentModal({ resident, streets, onClose, onSaved 
 
     setSaving(true);
     const payload = {
-      ...values,
+      ...normalizeResidentPayload(values),
       number_of_votes: Number(values.number_of_votes) || 0,
       ...(nameNa ? { first_name: "N/A", last_name: "N/A", cell_number: "N/A", email: "N/A" } : {}),
     };

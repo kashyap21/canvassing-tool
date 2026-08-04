@@ -3,11 +3,11 @@
 export const CSV_COLUMNS = [
   ["id", "Id"],
   ["created_at", "Created At"],
-  ["first_name", "First Name"],
-  ["last_name", "Last Name"],
   ["street_number", "Street Number"],
   ["street_name", "Street Name"],
   ["unit_no", "Unit No."],
+  ["first_name", "First Name"],
+  ["last_name", "Last Name"],
   ["cell_number", "Cell Number"],
   ["email", "Email"],
   ["supporter", "Supporter"],

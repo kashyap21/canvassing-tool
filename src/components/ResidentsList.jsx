@@ -1,16 +1,48 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { downloadCsv } from "../lib/csv";
+import { normalizeStreetPart } from "../lib/normalizeResident";
+import { findDuplicateGroups } from "../lib/duplicates";
+import DataCleanupModal from "./DataCleanupModal";
 import EditResidentModal from "./EditResidentModal";
 
 const PAGE = 1000; // Supabase returns at most 1000 rows per request.
 const SUPPORTER_LABELS = { yes: "Yes", no: "No", unknown: "Unknown" };
 const PAGE_SIZES = [25, 50, 100, 200];
+const ADDRESS_COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 // A resident is "N/A" when the canvasser ticked "No details given", which
 // stamps the name / phone / email fields with the literal "N/A".
 const isNa = (r) => r.first_name === "N/A";
 const residentName = (r) => [r.first_name, r.last_name].filter(Boolean).join(" ");
+const sortByAddress = (a, b) =>
+  ADDRESS_COLLATOR.compare(normalizeStreetPart(a.street_name), normalizeStreetPart(b.street_name)) ||
+  ADDRESS_COLLATOR.compare(normalizeStreetPart(a.street_number), normalizeStreetPart(b.street_number)) ||
+  ADDRESS_COLLATOR.compare(normalizeStreetPart(a.unit_no), normalizeStreetPart(b.unit_no)) ||
+  ADDRESS_COLLATOR.compare(a.last_name || "", b.last_name || "") ||
+  ADDRESS_COLLATOR.compare(a.first_name || "", b.first_name || "");
+const sortByStreetNumber = (a, b) =>
+  ADDRESS_COLLATOR.compare(normalizeStreetPart(a.street_number), normalizeStreetPart(b.street_number)) ||
+  ADDRESS_COLLATOR.compare(normalizeStreetPart(a.street_name), normalizeStreetPart(b.street_name)) ||
+  ADDRESS_COLLATOR.compare(normalizeStreetPart(a.unit_no), normalizeStreetPart(b.unit_no)) ||
+  ADDRESS_COLLATOR.compare(a.last_name || "", b.last_name || "") ||
+  ADDRESS_COLLATOR.compare(a.first_name || "", b.first_name || "");
+const SORTERS = {
+  street_number: sortByStreetNumber,
+  street_name: sortByAddress,
+  unit_no: (a, b) => ADDRESS_COLLATOR.compare(normalizeStreetPart(a.unit_no), normalizeStreetPart(b.unit_no)),
+  name: (a, b) => ADDRESS_COLLATOR.compare(residentName(a), residentName(b)),
+  cell_number: (a, b) => ADDRESS_COLLATOR.compare(a.cell_number || "", b.cell_number || ""),
+  supporter: (a, b) => ADDRESS_COLLATOR.compare(SUPPORTER_LABELS[a.supporter] || a.supporter || "", SUPPORTER_LABELS[b.supporter] || b.supporter || ""),
+  number_of_votes: (a, b) => (Number(a.number_of_votes) || 0) - (Number(b.number_of_votes) || 0),
+  lawn_sign: (a, b) => Number(a.lawn_sign) - Number(b.lawn_sign),
+  newsletter_consent: (a, b) => Number(a.newsletter_consent) - Number(b.newsletter_consent),
+  created_at: (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+};
+const SORT_FALLBACKS = {
+  street_number: sortByStreetNumber,
+  street_name: sortByAddress,
+};
 
 // Fetch EVERY row, page by page, so filtering / export cover all 7000+.
 async function fetchAllResidents() {
@@ -30,10 +62,13 @@ async function fetchAllResidents() {
   return all;
 }
 
-export default function ResidentsList() {
+export default function ResidentsList({ online, refreshKey }) {
   const [allRows, setAllRows] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [sort, setSort] = useState({ key: "street_name", dir: "asc" });
+  const [deletingId, setDeletingId] = useState(null);
 
   // Filters
   const [search, setSearch] = useState("");
@@ -48,37 +83,74 @@ export default function ResidentsList() {
 
   // The resident currently open in the edit modal (null when closed).
   const [editing, setEditing] = useState(null);
+  const [cleanupOpen, setCleanupOpen] = useState(false);
+
+  const loadRows = useCallback(async ({ showLoading = false } = {}) => {
+    if (!online) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+    if (showLoading) setLoading(true);
+    else setRefreshing(true);
+    setError("");
+    try {
+      setAllRows(await fetchAllResidents());
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      if (showLoading) setLoading(false);
+      else setRefreshing(false);
+    }
+  }, [online]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const data = await fetchAllResidents();
-        if (!cancelled) setAllRows(data);
-      } catch (e) {
-        if (!cancelled) setError(e.message);
-      }
-      if (!cancelled) setLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    loadRows({ showLoading: allRows.length === 0 });
+    // refreshKey intentionally refetches data pushed from App events.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadRows, refreshKey]);
 
-  // Distinct street names, for the street filter dropdown.
-  const streets = useMemo(() => {
-    const set = new Set();
-    for (const r of allRows) if (r.street_name) set.add(r.street_name);
-    return [...set].sort((a, b) => a.localeCompare(b));
+  useEffect(() => {
+    if (!online) return undefined;
+    const timer = setInterval(() => loadRows(), 5000);
+    return () => clearInterval(timer);
+  }, [loadRows, online]);
+
+  useEffect(() => {
+    if (!online) return undefined;
+    const channel = supabase
+      .channel("residents-table-refresh")
+      .on("postgres_changes", { event: "*", schema: "public", table: "residents" }, () => loadRows())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [loadRows, online]);
+
+  // Distinct street names, for the street filter dropdown. The counts make a
+  // mis-scanned street name ("Upp (1)") obvious without opening every row.
+  const streetCounts = useMemo(() => {
+    const counts = new Map();
+    for (const r of allRows) {
+      const normalized = normalizeStreetPart(r.street_name);
+      if (normalized) counts.set(normalized, (counts.get(normalized) || 0) + 1);
+    }
+    return counts;
   }, [allRows]);
+
+  const streets = useMemo(
+    () => [...streetCounts.keys()].sort((a, b) => a.localeCompare(b)),
+    [streetCounts],
+  );
+
+  const duplicateGroupCount = useMemo(() => findDuplicateGroups(allRows).length, [allRows]);
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     return allRows.filter((r) => {
       if (hideNa && isNa(r)) return false;
-      if (street && r.street_name !== street) return false;
+      if (street && normalizeStreetPart(r.street_name) !== street) return false;
       if (supporter && r.supporter !== supporter) return false;
       if (sign === "yes" && !r.lawn_sign) return false;
       if (sign === "no" && r.lawn_sign) return false;
@@ -98,15 +170,19 @@ export default function ResidentsList() {
         if (!hay.includes(q)) return false;
       }
       return true;
+    }).sort((a, b) => {
+      const primary = SORTERS[sort.key]?.(a, b) || 0;
+      const fallback = SORT_FALLBACKS[sort.key]?.(a, b) || sortByAddress(a, b);
+      return (primary || fallback) * (sort.dir === "asc" ? 1 : -1);
     });
-  }, [allRows, search, street, supporter, sign, hideNa]);
+  }, [allRows, search, street, supporter, sign, hideNa, sort]);
 
   const filtersActive = Boolean(search.trim() || street || supporter || sign || hideNa);
 
   // Reset to the first page whenever the result set changes.
   useEffect(() => {
     setPage(1);
-  }, [search, street, supporter, sign, hideNa, pageSize]);
+  }, [search, street, supporter, sign, hideNa, pageSize, sort]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -121,11 +197,76 @@ export default function ResidentsList() {
     setHideNa(false);
   }
 
+  function toggleSort(key) {
+    setSort((current) => ({
+      key,
+      dir: current.key === key && current.dir === "asc" ? "desc" : "asc",
+    }));
+  }
+
+  function sortArrow(key) {
+    if (sort.key !== key) return "";
+    return sort.dir === "asc" ? "↑" : "↓";
+  }
+
+  function sortableHeader(key, label) {
+    const active = sort.key === key;
+    return (
+      <th aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
+        <button
+          type="button"
+          className="sort-header"
+          aria-label={`Sort ${label} ${active && sort.dir === "asc" ? "descending" : "ascending"}`}
+          onClick={() => toggleSort(key)}
+        >
+          {label}
+          <span aria-hidden="true">{sortArrow(key)}</span>
+        </button>
+      </th>
+    );
+  }
+
   // Swap the updated row into the local list so the table reflects the edit
   // without a full refetch, then close the modal.
   function handleSaved(updated) {
     setAllRows((rows) => rows.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)));
     setEditing(null);
+  }
+
+  // Merges / renames / deletes made in the clean-up tool, folded into the table
+  // straight away so the modal reflects what is left to fix.
+  function handleCleanupApplied({ updated = [], removedIds = [] }) {
+    setAllRows((rows) => {
+      const patched = new Map(updated.map((row) => [row.id, row]));
+      const removed = new Set(removedIds);
+      return rows
+        .filter((row) => !removed.has(row.id))
+        .map((row) => (patched.has(row.id) ? { ...row, ...patched.get(row.id) } : row));
+    });
+  }
+
+  async function handleDelete(row) {
+    const name = residentName(row) || "this resident";
+    const address = [row.street_number, row.street_name, row.unit_no ? `#${row.unit_no}` : ""]
+      .filter(Boolean)
+      .join(" ");
+    const confirmed = window.confirm(`Delete ${name} at ${address}?\n\nThis cannot be undone.`);
+    if (!confirmed) return;
+
+    setDeletingId(row.id);
+    setError("");
+    const { error: deleteError } = await supabase
+      .from("residents")
+      .delete()
+      .eq("id", row.id);
+    setDeletingId(null);
+
+    if (deleteError) {
+      setError(deleteError.message);
+      return;
+    }
+
+    setAllRows((rows) => rows.filter((r) => r.id !== row.id));
   }
 
   return (
@@ -161,7 +302,7 @@ export default function ResidentsList() {
             <option value="">All streets</option>
             {streets.map((s) => (
               <option key={s} value={s}>
-                {s}
+                {s} ({streetCounts.get(s)})
               </option>
             ))}
           </select>
@@ -207,6 +348,22 @@ export default function ResidentsList() {
         </button>
         <button
           type="button"
+          className="btn"
+          onClick={() => loadRows()}
+          disabled={!online || loading || refreshing}
+        >
+          {refreshing ? "Refreshing..." : "Refresh"}
+        </button>
+        <button
+          type="button"
+          className={duplicateGroupCount > 0 ? "btn btn-alert" : "btn"}
+          disabled={loading || allRows.length === 0}
+          onClick={() => setCleanupOpen(true)}
+        >
+          Clean up{duplicateGroupCount > 0 ? ` (${duplicateGroupCount} duplicates)` : ""}
+        </button>
+        <button
+          type="button"
           className="btn btn-primary export-btn"
           disabled={loading || filtered.length === 0}
           onClick={() => downloadCsv(filtered)}
@@ -219,27 +376,26 @@ export default function ResidentsList() {
         <table className="data">
           <thead>
             <tr>
-              <th>Name</th>
-              <th>Address</th>
-              <th>Cell</th>
-              <th>Supporter</th>
-              <th>Votes</th>
-              <th>Sign</th>
-              <th>News</th>
-              <th>Added</th>
+              {sortableHeader("street_number", "Street #")}
+              {sortableHeader("street_name", "Street Name")}
+              {sortableHeader("unit_no", "Unit")}
+              {sortableHeader("name", "Name")}
+              {sortableHeader("cell_number", "Cell")}
+              {sortableHeader("supporter", "Supporter")}
+              {sortableHeader("number_of_votes", "Votes")}
+              {sortableHeader("lawn_sign", "Sign")}
+              {sortableHeader("newsletter_consent", "News")}
+              {sortableHeader("created_at", "Added")}
               <th aria-label="Actions"></th>
             </tr>
           </thead>
           <tbody>
             {pageRows.map((r) => (
               <tr key={r.id}>
-                <td>
-                  {residentName(r)}
-                </td>
-                <td>
-                  {r.street_number} {r.street_name}
-                  {r.unit_no ? ` · #${r.unit_no}` : ""}
-                </td>
+                <td>{r.street_number}</td>
+                <td>{r.street_name}</td>
+                <td>{r.unit_no || ""}</td>
+                <td>{residentName(r)}</td>
                 <td>{r.cell_number}</td>
                 <td>{SUPPORTER_LABELS[r.supporter] || r.supporter}</td>
                 <td>{r.number_of_votes}</td>
@@ -247,15 +403,25 @@ export default function ResidentsList() {
                 <td>{r.newsletter_consent ? "Yes" : "No"}</td>
                 <td>{new Date(r.created_at).toLocaleString()}</td>
                 <td className="col-actions">
-                  <button type="button" className="btn btn-edit" onClick={() => setEditing(r)}>
-                    Edit
-                  </button>
+                  <div className="row-actions">
+                    <button type="button" className="btn btn-edit" onClick={() => setEditing(r)}>
+                      Edit
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-delete"
+                      disabled={!online || deletingId === r.id}
+                      onClick={() => handleDelete(r)}
+                    >
+                      {deletingId === r.id ? "Deleting..." : "Delete"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
             {!loading && filtered.length === 0 && (
               <tr>
-                <td colSpan="9" className="empty">
+                <td colSpan="11" className="empty">
                   {allRows.length === 0 ? "No residents yet." : "No residents match these filters."}
                 </td>
               </tr>
@@ -309,6 +475,15 @@ export default function ResidentsList() {
           streets={streets}
           onClose={() => setEditing(null)}
           onSaved={handleSaved}
+        />
+      )}
+
+      {cleanupOpen && (
+        <DataCleanupModal
+          rows={allRows}
+          online={online}
+          onClose={() => setCleanupOpen(false)}
+          onApplied={handleCleanupApplied}
         />
       )}
     </div>

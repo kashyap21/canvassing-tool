@@ -22,6 +22,7 @@ create table if not exists public.residents (
     lawn_sign       boolean     not null default false,
     newsletter_consent boolean  not null default false,
     comments        text        not null default '',
+    client_entry_id uuid        unique,
     created_at      timestamptz not null default now(),
     -- who saved this row (handy when 4 canvassers share one database)
     created_by      uuid        default auth.uid() references auth.users (id)
@@ -41,6 +42,9 @@ alter table public.residents
     alter column cell_number set default '',
     alter column email drop not null,
     alter column email set default '';
+
+alter table public.residents
+    add column if not exists client_entry_id uuid unique;
 
 -- ---------------------------------------------------------------------------
 -- 2. Row Level Security
@@ -78,9 +82,9 @@ create or replace function public.distinct_streets()
     security invoker
     set search_path = public
 as $$
-    select distinct street_name
+    select distinct trim(regexp_replace(street_name, '[[:space:]]+', ' ', 'g')) as street_name
     from public.residents
-    where street_name <> ''
+    where trim(regexp_replace(street_name, '[[:space:]]+', ' ', 'g')) <> ''
     order by street_name;
 $$;
 
