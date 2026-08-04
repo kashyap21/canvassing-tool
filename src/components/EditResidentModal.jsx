@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { normalizeResidentPayload } from "../lib/normalizeResident";
+import StreetAutocomplete from "./StreetAutocomplete";
 
 const SUPPORTER_CHOICES = [
   ["yes", "Yes"],
@@ -157,19 +158,13 @@ export default function EditResidentModal({ resident, streets, onClose, onSaved 
           </div>
           <div className="field">
             <label htmlFor="e_street_name">Street name</label>
-            <input
+            <StreetAutocomplete
               id="e_street_name"
-              type="text"
-              list="edit-street-options"
-              autoComplete="off"
+              listId="edit-street-options"
+              streets={streets}
               value={values.street_name}
-              onChange={(e) => set("street_name", e.target.value)}
+              onChange={(v) => set("street_name", v)}
             />
-            <datalist id="edit-street-options">
-              {(streets || []).map((s) => (
-                <option value={s} key={s} />
-              ))}
-            </datalist>
             {errors.street_name && <span className="err">{errors.street_name}</span>}
           </div>
 

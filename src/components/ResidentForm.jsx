@@ -3,6 +3,7 @@ import { supabase } from "../supabaseClient";
 import { isRetryableNetworkError, queueResident } from "../lib/offlineQueue";
 import { normalizeResidentPayload } from "../lib/normalizeResident";
 import { findAddressMatches, formatAddress, meaningful, normalizeStreetNumber } from "../lib/duplicates";
+import StreetAutocomplete from "./StreetAutocomplete";
 
 const SUPPORTER_CHOICES = [
   ["yes", "Yes"],
@@ -21,7 +22,8 @@ const EMPTY = {
   cell_number: "",
   email: "",
   supporter: "unknown",
-  number_of_votes: 1,
+  // An unknown door starts at 0 — nothing is counted until someone says yes.
+  number_of_votes: 0,
   lawn_sign: false,
   newsletter_consent: false,
   comments: "",
@@ -59,21 +61,11 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
   const [dupBlocked, setDupBlocked] = useState(false);
   const dupRequestRef = useRef(0);
 
-  // Live street type-ahead: refine the <datalist> from the DB as the user types.
-  const [streetOptions, setStreetOptions] = useState(streets);
-  useEffect(() => setStreetOptions(streets), [streets]);
-
-  useEffect(() => {
-    const q = values.street_name.trim().toLowerCase();
-    if (q.length < 2) {
-      setStreetOptions(streets);
-      return;
-    }
-    const timer = setTimeout(() => {
-      setStreetOptions(streets.filter((s) => s.toLowerCase().includes(q)).slice(0, 10));
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [values.street_name, streets]);
+  // Until the canvasser types a number of their own, the vote count follows the
+  // supporter answer: 0 for an unknown door, 1 once they say yes or no. Typing a
+  // number takes over, so a hand-entered "3" is never overwritten by a later
+  // change of supporter.
+  const [votesEdited, setVotesEdited] = useState(false);
 
   // Ask the database whether this address is already recorded, ~1/3 s after the
   // typist stops. Only rows with the same street number come back, so this stays
@@ -120,6 +112,23 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
 
   function set(field, value) {
     setValues((v) => ({ ...v, [field]: value }));
+  }
+
+  function setSupporter(value) {
+    setValues((v) => ({
+      ...v,
+      supporter: value,
+      ...(votesEdited ? {} : { number_of_votes: value === "unknown" ? 0 : 1 }),
+    }));
+  }
+
+  // Back to a blank door, ready for the next one.
+  function resetForm() {
+    setValues(EMPTY);
+    setNameNa(false);
+    setErrors({});
+    setVotesEdited(false);
+    document.getElementById("street_number")?.focus();
   }
 
   function toggleNa(checked) {
@@ -182,10 +191,7 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
     if (!online) {
       queueResident(payload);
       setFlash("Saved offline. It will sync automatically when this device is online.");
-      setValues(EMPTY);
-      setNameNa(false);
-      setErrors({});
-      document.getElementById("street_number")?.focus();
+      resetForm();
       return;
     }
 
@@ -197,10 +203,7 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
       if (isRetryableNetworkError(error)) {
         queueResident(payload);
         setFlash("Saved offline. It will sync automatically when this device is online.");
-        setValues(EMPTY);
-        setNameNa(false);
-        setErrors({});
-        document.getElementById("street_number")?.focus();
+        resetForm();
         return;
       }
 
@@ -212,12 +215,9 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
     const displayName = [payload.first_name, payload.last_name].filter(Boolean).join(" ").trim();
     const displayAddress = [payload.street_number, payload.street_name].filter(Boolean).join(" ").trim();
     setFlash(`Saved ${displayName || displayAddress || "resident"}.`);
-    setValues(EMPTY);
-    setNameNa(false);
-    setErrors({});
+    // Also returns focus to the first field, for fast repeat entry.
+    resetForm();
     onSaved(); // refresh streets / stats / recent
-    // Return focus to the first field for fast repeat entry.
-    document.getElementById("street_number")?.focus();
   }
 
   return (
@@ -247,20 +247,14 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
           </div>
           <div className="field">
             <label htmlFor="street_name">Street name</label>
-            <input
+            <StreetAutocomplete
               id="street_name"
-              type="text"
-              list="street-options"
-              autoComplete="off"
+              listId="street-options"
               placeholder="e.g. Maple Street"
+              streets={streets}
               value={values.street_name}
-              onChange={(e) => set("street_name", e.target.value)}
+              onChange={(v) => set("street_name", v)}
             />
-            <datalist id="street-options">
-              {streetOptions.map((s) => (
-                <option value={s} key={s} />
-              ))}
-            </datalist>
             <span className="hint">Start typing — streets you entered before will appear.</span>
             {errors.street_name && <span className="err">{errors.street_name}</span>}
           </div>
@@ -399,7 +393,7 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
                     name="supporter"
                     value={val}
                     checked={values.supporter === val}
-                    onChange={(e) => set("supporter", e.target.value)}
+                    onChange={(e) => setSupporter(e.target.value)}
                   />
                   <span>{label}</span>
                 </label>
@@ -416,7 +410,10 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
               step="1"
               className="field-narrow"
               value={values.number_of_votes}
-              onChange={(e) => set("number_of_votes", e.target.value)}
+              onChange={(e) => {
+                setVotesEdited(true);
+                set("number_of_votes", e.target.value);
+              }}
             />
             {errors.number_of_votes && <span className="err">{errors.number_of_votes}</span>}
           </div>
@@ -480,10 +477,7 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
                 disabled={saving}
                 onClick={() => {
                   setDupBlocked(false);
-                  setValues(EMPTY);
-                  setNameNa(false);
-                  setErrors({});
-                  document.getElementById("street_number")?.focus();
+                  resetForm();
                 }}
               >
                 Skip this one

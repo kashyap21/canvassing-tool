@@ -270,6 +270,43 @@ textarea:focus {
 
 input.is-na { color: var(--muted); background: #f0f2f5; cursor: not-allowed; }
 
+/* Street name suggestions (search-box style list, replaces <datalist>) */
+.combo { position: relative; }
+.combo-list {
+    position: absolute;
+    z-index: 30;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    max-height: 340px;
+    margin: 0;
+    padding: 6px 0;
+    overflow-y: auto;
+    list-style: none;
+    background: #fff;
+    border: 2px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 12px 28px rgba(16, 24, 40, 0.16);
+    -webkit-overflow-scrolling: touch;
+}
+.combo-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 56px;
+    padding: 10px 16px;
+    font-size: 20px;
+    color: var(--ink);
+    cursor: pointer;
+}
+/* Typed-so-far stays light, the rest of the street reads bold — same emphasis
+   pattern as a search suggestion list. */
+.combo-option .combo-text { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.combo-option .combo-text strong { font-weight: 400; }
+.combo-icon { flex: 0 0 auto; width: 20px; height: 20px; color: #9aa4b0; }
+.combo-option.is-active { background: rgba(31, 111, 235, 0.1); }
+.combo-option.is-active .combo-icon { color: var(--accent); }
+
 /* Supporter radio pills */
 .radios { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .radio-pill {
