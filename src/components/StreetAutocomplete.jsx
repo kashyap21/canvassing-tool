@@ -19,6 +19,9 @@ export default function StreetAutocomplete({
   streets,
   placeholder,
   listId,
+  // For an input pinned near the bottom of the screen, where a list opening
+  // downwards would fall out of view.
+  dropUp = false,
 }) {
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(-1); // -1 = nothing highlighted yet
@@ -110,7 +113,12 @@ export default function StreetAutocomplete({
       />
 
       {showList && (
-        <ul className="combo-list" id={listId} role="listbox" ref={listRef}>
+        <ul
+          className={dropUp ? "combo-list is-up" : "combo-list"}
+          id={listId}
+          role="listbox"
+          ref={listRef}
+        >
           {suggestions.map((street, i) => {
             const [before, match, after] = splitMatch(street, query);
             return (

@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { findDuplicateGroups, meaningful, mergeResidents, summarizeStreets } from "../lib/duplicates";
+import { findStreetClusters, selectionSummary } from "../lib/streetGroups";
+import StreetAutocomplete from "./StreetAutocomplete";
 
 const SUPPORTER_LABELS = { yes: "Yes", no: "No", unknown: "Unknown" };
 const KIND_LABELS = {
@@ -10,6 +12,7 @@ const KIND_LABELS = {
 };
 const MAX_GROUPS = 60;
 const MAX_STREETS = 60;
+const MAX_CLUSTERS = 12;
 const ID_CHUNK = 200; // keep the ?id=in.(…) query string a sane length
 
 const residentName = (r) => [r.first_name, r.last_name].filter(Boolean).join(" ").trim();
@@ -24,16 +27,27 @@ function chunk(items, size) {
  * Clean-up tool for the Data tab: merge entries that landed in the table twice,
  * and repair street names that came out of the scans wrong.
  */
-export default function DataCleanupModal({ rows, online, onClose, onApplied }) {
-  const [tab, setTab] = useState("duplicates");
+export default function DataCleanupModal({
+  rows,
+  online,
+  initialTab = "duplicates",
+  initialStreetQuery = "",
+  onClose,
+  onApplied,
+}) {
+  const [tab, setTab] = useState(initialTab);
   const [keepIds, setKeepIds] = useState({});
   const [dismissed, setDismissed] = useState([]);
   const [busyKey, setBusyKey] = useState("");
   const [error, setError] = useState("");
   const [flash, setFlash] = useState("");
   const [onlySameName, setOnlySameName] = useState(false);
-  const [streetQuery, setStreetQuery] = useState("");
+  const [streetQuery, setStreetQuery] = useState(initialStreetQuery);
   const [renaming, setRenaming] = useState(null); // { key, value }
+
+  // Bulk rename: the ticked streets and the one name they should all become.
+  const [selected, setSelected] = useState(() => new Set());
+  const [bulkName, setBulkName] = useState("");
 
   useEffect(() => {
     const onKey = (e) => {
@@ -45,6 +59,15 @@ export default function DataCleanupModal({ rows, online, onClose, onApplied }) {
 
   const groups = useMemo(() => findDuplicateGroups(rows), [rows]);
   const streets = useMemo(() => summarizeStreets(rows), [rows]);
+  const streetLabels = useMemo(() => streets.map((s) => s.label), [streets]);
+  const clusters = useMemo(() => findStreetClusters(streets), [streets]);
+  const selection = useMemo(() => selectionSummary(streets, selected), [streets, selected]);
+
+  // Offer the busiest ticked spelling as the target, until something is typed.
+  useEffect(() => {
+    if (!selected.size) return;
+    setBulkName((current) => current || selection.suggestedName);
+  }, [selected, selection.suggestedName]);
 
   const visibleGroups = groups.filter(
     (g) => !dismissed.includes(g.key) && (!onlySameName || g.kind === "same-name"),
@@ -109,43 +132,106 @@ export default function DataCleanupModal({ rows, online, onClose, onApplied }) {
     setFlash(`Deleted ${label} at ${group.address}.`);
   }
 
+  // Write one street name across many entries, a chunk of ids at a time. Returns
+  // whatever was written before any failure, so a partial change still reaches
+  // the table instead of being silently dropped.
+  async function renameIds(ids, value) {
+    const updated = [];
+    for (const batch of chunk(ids, ID_CHUNK)) {
+      const { data, error: updateError } = await supabase
+        .from("residents")
+        .update({ street_name: value })
+        .in("id", batch)
+        .select();
+      if (updateError) return { updated, error: updateError };
+      updated.push(...(data || []));
+    }
+    return { updated, error: null };
+  }
+
+  const entries = (n) => `${n} entr${n === 1 ? "y" : "ies"}`;
+
   async function saveRename(street) {
     const value = renaming.value.trim().replace(/\s+/g, " ");
     if (!value) {
       setError("Enter a street name.");
       return;
     }
-    if (
-      !window.confirm(
-        `Rename "${street.label}" to "${value}" on ${street.count} entr${street.count === 1 ? "y" : "ies"}?`,
-      )
-    )
-      return;
+    if (!window.confirm(`Rename "${street.label}" to "${value}" on ${entries(street.count)}?`)) return;
 
     setBusyKey(`street:${street.key}`);
     setError("");
     setFlash("");
 
-    const updated = [];
-    for (const ids of chunk(street.ids, ID_CHUNK)) {
-      const { data, error: updateError } = await supabase
-        .from("residents")
-        .update({ street_name: value })
-        .in("id", ids)
-        .select();
-      if (updateError) {
-        setBusyKey("");
-        setError(updateError.message);
-        if (updated.length) onApplied({ updated, removedIds: [] });
-        return;
-      }
-      updated.push(...(data || []));
+    const { updated, error: updateError } = await renameIds(street.ids, value);
+    setBusyKey("");
+
+    if (updated.length) onApplied({ updated, removedIds: [] });
+    if (updateError) {
+      setError(updateError.message);
+      return;
     }
 
-    setBusyKey("");
     setRenaming(null);
-    onApplied({ updated, removedIds: [] });
-    setFlash(`Renamed ${updated.length} entr${updated.length === 1 ? "y" : "ies"} to "${value}".`);
+    setFlash(`Renamed ${entries(updated.length)} to "${value}".`);
+  }
+
+  function toggleStreet(key) {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function clearSelection() {
+    setSelected(new Set());
+    setBulkName("");
+  }
+
+  // Tick a suggested group (the mis-scans plus the street they belong to) and
+  // pre-fill the target with the busy street's spelling.
+  function tickCluster(cluster) {
+    setSelected(new Set(cluster.keys));
+    setBulkName(cluster.target.label);
+  }
+
+  async function applyBulkRename() {
+    const value = bulkName.trim().replace(/\s+/g, " ");
+    if (!value) {
+      setError("Enter the street name to use.");
+      return;
+    }
+    if (!selection.entryCount) {
+      setError("Tick at least one street first.");
+      return;
+    }
+    if (
+      !window.confirm(
+        `Rename ${selection.streetCount} street${selection.streetCount === 1 ? "" : "s"} — ` +
+          `${entries(selection.entryCount)} — to "${value}"?\n\nThis cannot be undone.`,
+      )
+    )
+      return;
+
+    setBusyKey("bulk");
+    setError("");
+    setFlash("");
+
+    // Every ticked entry is written, including ones already spelt this way, so a
+    // group holding several spellings ends up completely consistent.
+    const { updated, error: updateError } = await renameIds(selection.ids, value);
+    setBusyKey("");
+
+    if (updated.length) onApplied({ updated, removedIds: [] });
+    if (updateError) {
+      setError(updateError.message);
+      return;
+    }
+
+    clearSelection();
+    setFlash(`Renamed ${entries(updated.length)} to "${value}".`);
   }
 
   return (
@@ -304,8 +390,46 @@ export default function DataCleanupModal({ rows, online, onClose, onApplied }) {
           <div className="cleanup-body">
             <p className="sub">
               Every street in the database, rarest first — a name that appears once or twice is
-              usually a mis-read scan. Renaming updates every entry on that street at once.
+              usually a mis-read scan. Rename one street on its own, or tick several and give them
+              all the same name in one go.
             </p>
+
+            {clusters.length > 0 && (
+              <section className="street-suggest">
+                <h3>Likely mis-scans</h3>
+                <p className="sub">
+                  Rare spellings that look like a busier street. Ticking a group only fills in the
+                  box below — nothing changes until you apply it.
+                </p>
+                <ul className="street-suggest-list">
+                  {clusters.slice(0, MAX_CLUSTERS).map((cluster) => (
+                    <li key={cluster.key}>
+                      <p className="street-suggest-line">
+                        {cluster.variants.map((v) => (
+                          <span className="street-variant" key={v.key}>
+                            {v.label} <span className="street-count is-rare">{v.count}</span>
+                            {v.reason === "truncated" && <span className="badge">cut short</span>}
+                          </span>
+                        ))}
+                        <span className="street-arrow" aria-hidden="true">
+                          →
+                        </span>
+                        <span className="street-name">{cluster.target.label}</span>
+                        <span className="street-count">{cluster.target.count}</span>
+                      </p>
+                      <button type="button" className="btn" onClick={() => tickCluster(cluster)}>
+                        Tick this group · {entries(cluster.entryCount)} to fix
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                {clusters.length > MAX_CLUSTERS && (
+                  <p className="sub">
+                    Showing the {MAX_CLUSTERS} biggest of {clusters.length} suggested groups.
+                  </p>
+                )}
+              </section>
+            )}
 
             <div className="filter">
               <label htmlFor="street-search">Find a street</label>
@@ -318,13 +442,66 @@ export default function DataCleanupModal({ rows, online, onClose, onApplied }) {
               />
             </div>
 
+            {visibleStreets.length > 1 && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={() => setSelected(new Set(visibleStreets.map((s) => s.key)))}
+              >
+                Tick all {visibleStreets.length} shown
+              </button>
+            )}
+
+            {selection.streetCount > 0 && (
+              <section className="street-bulk" aria-label="Rename the ticked streets">
+                <p className="street-bulk-count">
+                  <strong>
+                    {selection.streetCount} street{selection.streetCount === 1 ? "" : "s"} ticked
+                  </strong>{" "}
+                  · {entries(selection.entryCount)} will be renamed
+                </p>
+                <div className="street-bulk-row">
+                  <StreetAutocomplete
+                    id="bulk-street-name"
+                    listId="bulk-street-options"
+                    placeholder="Name to use for all of them"
+                    streets={streetLabels}
+                    value={bulkName}
+                    onChange={setBulkName}
+                    dropUp
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={!online || busyKey === "bulk" || !bulkName.trim()}
+                    onClick={applyBulkRename}
+                  >
+                    {busyKey === "bulk" ? "Renaming…" : "Rename all ticked"}
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={clearSelection}>
+                    Clear
+                  </button>
+                </div>
+              </section>
+            )}
+
             <ul className="street-list">
               {visibleStreets.slice(0, MAX_STREETS).map((street) => (
-                <li className="street-row" key={street.key}>
+                <li
+                  className={selected.has(street.key) ? "street-row is-ticked" : "street-row"}
+                  key={street.key}
+                >
                   <div className="street-main">
-                    <span className="street-name">{street.label}</span>
+                    <label className="street-tick">
+                      <input
+                        type="checkbox"
+                        checked={selected.has(street.key)}
+                        onChange={() => toggleStreet(street.key)}
+                      />
+                      <span className="street-name">{street.label}</span>
+                    </label>
                     <span className={street.count <= 2 ? "street-count is-rare" : "street-count"}>
-                      {street.count} entr{street.count === 1 ? "y" : "ies"}
+                      {entries(street.count)}
                     </span>
                   </div>
                   <p className="street-samples">{street.samples.join(" · ")}</p>

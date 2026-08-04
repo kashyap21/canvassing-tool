@@ -83,7 +83,8 @@ export default function ResidentsList({ online, refreshKey }) {
 
   // The resident currently open in the edit modal (null when closed).
   const [editing, setEditing] = useState(null);
-  const [cleanupOpen, setCleanupOpen] = useState(false);
+  // The clean-up tool, opened on one of its two tabs (null when closed).
+  const [cleanup, setCleanup] = useState(null); // { tab, streetQuery }
 
   const loadRows = useCallback(async ({ showLoading = false } = {}) => {
     if (!online) {
@@ -356,9 +357,19 @@ export default function ResidentsList({ online, refreshKey }) {
         </button>
         <button
           type="button"
+          className="btn"
+          disabled={loading || allRows.length === 0}
+          // Opens on the street tab, narrowed to the street being filtered on, so
+          // renaming everything on one street is two clicks from the table.
+          onClick={() => setCleanup({ tab: "streets", streetQuery: street })}
+        >
+          Edit street names{street ? ` (${street})` : ""}
+        </button>
+        <button
+          type="button"
           className={duplicateGroupCount > 0 ? "btn btn-alert" : "btn"}
           disabled={loading || allRows.length === 0}
-          onClick={() => setCleanupOpen(true)}
+          onClick={() => setCleanup({ tab: "duplicates", streetQuery: "" })}
         >
           Clean up{duplicateGroupCount > 0 ? ` (${duplicateGroupCount} duplicates)` : ""}
         </button>
@@ -478,11 +489,13 @@ export default function ResidentsList({ online, refreshKey }) {
         />
       )}
 
-      {cleanupOpen && (
+      {cleanup && (
         <DataCleanupModal
           rows={allRows}
           online={online}
-          onClose={() => setCleanupOpen(false)}
+          initialTab={cleanup.tab}
+          initialStreetQuery={cleanup.streetQuery}
+          onClose={() => setCleanup(null)}
           onApplied={handleCleanupApplied}
         />
       )}

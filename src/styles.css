@@ -283,12 +283,14 @@ input.is-na { color: var(--muted); background: #f0f2f5; cursor: not-allowed; }
     padding: 6px 0;
     overflow-y: auto;
     list-style: none;
-    background: #fff;
+    /* --card, not #fff: this list also renders on the dark theme. */
+    background: var(--card);
     border: 2px solid var(--line);
     border-radius: 12px;
     box-shadow: 0 12px 28px rgba(16, 24, 40, 0.16);
     -webkit-overflow-scrolling: touch;
 }
+.combo-list.is-up { top: auto; bottom: calc(100% + 6px); box-shadow: 0 -12px 28px rgba(16, 24, 40, 0.16); }
 .combo-option {
     display: flex;
     align-items: center;
@@ -675,6 +677,48 @@ table.data td.col-actions { text-align: right; }
 .street-rename { display: flex; flex-wrap: wrap; gap: 10px; }
 .street-rename input { flex: 1; min-width: 220px; height: 54px; font-size: 18px; }
 
+/* Bulk street rename: suggested mis-scan groups, tick boxes, and the apply bar */
+.street-suggest {
+    margin-top: 16px;
+    padding: 16px;
+    background: rgba(31, 111, 235, 0.06);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+}
+.street-suggest h3 { margin: 0; font-size: 20px; }
+.street-suggest .sub { margin: 6px 0 0; }
+.street-suggest-list { list-style: none; margin: 12px 0 0; padding: 0; }
+.street-suggest-list > li { padding: 12px 0; border-top: 1px solid var(--line); }
+.street-suggest-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px;
+    margin: 0 0 10px;
+}
+.street-variant { font-size: 18px; text-decoration: line-through; text-decoration-color: #b42318; }
+.street-arrow { color: var(--muted); font-size: 20px; }
+
+.street-tick { display: flex; align-items: center; gap: 10px; margin: 0; font-weight: 600; cursor: pointer; }
+.street-tick input { width: 22px; height: 22px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.street-row.is-ticked { background: rgba(31, 111, 235, 0.07); }
+
+.street-bulk {
+    position: sticky;
+    bottom: 0;
+    z-index: 20;
+    margin-top: 16px;
+    padding: 14px 16px;
+    background: var(--card);
+    border: 2px solid var(--accent);
+    border-radius: 12px;
+    box-shadow: 0 -6px 18px rgba(16, 24, 40, 0.1);
+}
+.street-bulk-count { margin: 0 0 10px; font-size: 17px; }
+.street-bulk-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 10px; }
+.street-bulk-row .combo { flex: 1; min-width: 220px; }
+.street-bulk-row .combo input { height: 54px; font-size: 18px; }
+
 @media (max-width: 480px) {
     body { font-size: 21px; }
     .row { grid-template-columns: 1fr; }
@@ -706,4 +750,8 @@ table.data td.col-actions { text-align: right; }
     .badge-no-name { background: #33260d; color: #f0c274; }
     .btn-alert { color: #ff9d92; border-color: #7a2f27; }
     .street-count.is-rare { color: #ff9d92; }
+    .combo-option.is-active { background: rgba(31, 111, 235, 0.22); }
+    .street-variant { text-decoration-color: #ff9d92; }
+    .street-suggest { background: rgba(31, 111, 235, 0.12); }
+    .street-row.is-ticked { background: rgba(31, 111, 235, 0.14); }
 }
