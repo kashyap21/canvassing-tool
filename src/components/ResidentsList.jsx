@@ -45,6 +45,13 @@ const SORT_FALLBACKS = {
   street_name: sortByAddress,
 };
 
+function printableDataUrl() {
+  if (window.location.hostname.endsWith("github.io")) {
+    return `${window.location.pathname}${window.location.search}#/data/print`;
+  }
+  return "/data/print";
+}
+
 // Fetch EVERY row, page by page, so filtering / export cover all 7000+.
 async function fetchAllResidents() {
   let from = 0;
@@ -382,7 +389,7 @@ export default function ResidentsList({ online, refreshKey }) {
             type="button"
             className="btn"
             disabled={loading || allRows.length === 0}
-            onClick={() => window.open(`${window.location.pathname}${window.location.search}#/data/print`, "_blank", "noopener")}
+            onClick={() => window.open(printableDataUrl(), "_blank", "noopener")}
           >
             Print data
           </button>

@@ -7,11 +7,16 @@ import ResidentsList from "./components/ResidentsList";
 import PrintableResidentsPage from "./components/PrintableResidentsPage";
 import { flushPendingResidents, getPendingResidentCount } from "./lib/offlineQueue";
 
+function currentRoute() {
+  if (window.location.hash) return window.location.hash;
+  return window.location.pathname.replace(/\/$/, "") || "/";
+}
+
 export default function App() {
   const [session, setSession] = useState(null);
   const [ready, setReady] = useState(false);
   const [view, setView] = useState("add"); // "add" | "data"
-  const [route, setRoute] = useState(() => window.location.hash || "#/");
+  const [route, setRoute] = useState(currentRoute);
 
   // Data the form needs: known streets, header counters, recent entries.
   const [streets, setStreets] = useState([]);
@@ -37,17 +42,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    function handleHashChange() {
-      setRoute(window.location.hash || "#/");
+    function handleRouteChange() {
+      setRoute(currentRoute());
     }
 
-    window.addEventListener("hashchange", handleHashChange);
-    return () => window.removeEventListener("hashchange", handleHashChange);
+    window.addEventListener("hashchange", handleRouteChange);
+    window.addEventListener("popstate", handleRouteChange);
+    return () => {
+      window.removeEventListener("hashchange", handleRouteChange);
+      window.removeEventListener("popstate", handleRouteChange);
+    };
   }, []);
 
   useEffect(() => {
-    if (route === "#/data") setView("data");
-    if (route === "#/" || route === "#/add") setView("add");
+    if (route === "#/data" || route === "/data") setView("data");
+    if (route === "#/" || route === "#/add" || route === "/" || route === "/add") setView("add");
   }, [route]);
 
   const refresh = useCallback(async () => {
@@ -172,7 +181,7 @@ export default function App() {
     );
   }
 
-  if (route === "#/data/print") {
+  if (route === "#/data/print" || route === "/data/print") {
     return <PrintableResidentsPage />;
   }
 
