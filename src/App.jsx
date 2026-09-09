@@ -8,7 +8,7 @@ import PrintableResidentsPage from "./components/PrintableResidentsPage";
 import { flushPendingResidents, getPendingResidentCount } from "./lib/offlineQueue";
 
 function currentRoute() {
-  if (window.location.hash) return window.location.hash;
+  if (window.location.hash) return window.location.hash.split("?")[0];
   return window.location.pathname.replace(/\/$/, "") || "/";
 }
 

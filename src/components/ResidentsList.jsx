@@ -45,11 +45,21 @@ const SORT_FALLBACKS = {
   street_name: sortByAddress,
 };
 
-function printableDataUrl() {
+function printableDataUrl({ search, street, supporter, sign, hideNa, sort }) {
+  const params = new URLSearchParams();
+  if (search.trim()) params.set("search", search.trim());
+  if (street) params.set("street", street);
+  if (supporter) params.set("supporter", supporter);
+  if (sign) params.set("sign", sign);
+  if (hideNa) params.set("hideNa", "1");
+  params.set("sort", sort.key);
+  params.set("dir", sort.dir);
+  const query = params.toString();
+
   if (window.location.hostname.endsWith("github.io")) {
-    return `${window.location.pathname}${window.location.search}#/data/print`;
+    return `${window.location.pathname}${window.location.search}#/data/print${query ? `?${query}` : ""}`;
   }
-  return "/data/print";
+  return `/data/print${query ? `?${query}` : ""}`;
 }
 
 // Fetch EVERY row, page by page, so filtering / export cover all 7000+.
@@ -389,7 +399,13 @@ export default function ResidentsList({ online, refreshKey }) {
             type="button"
             className="btn"
             disabled={loading || allRows.length === 0}
-            onClick={() => window.open(printableDataUrl(), "_blank", "noopener")}
+            onClick={() =>
+              window.open(
+                printableDataUrl({ search, street, supporter, sign, hideNa, sort }),
+                "_blank",
+                "noopener",
+              )
+            }
           >
             Print data
           </button>
