@@ -10,6 +10,43 @@ const COLUMNS = [
   ["comments", "Comments"],
 ];
 
+const PRINT_SELECT = "street_number, street_name, unit_no, first_name, last_name, cell_number, comments";
+
+function withName(row) {
+  return {
+    street_number: row.street_number || "",
+    street_name: row.street_name || "",
+    unit_no: row.unit_no || "",
+    name: [row.first_name, row.last_name].filter(Boolean).join(" "),
+    cell_number: row.cell_number || "",
+    comments: row.comments || "",
+  };
+}
+
+function isMissingPrintableRpc(error) {
+  return (
+    error?.code === "PGRST202" ||
+    /printable_residents|schema cache|Could not find the function/i.test(error?.message || "")
+  );
+}
+
+async function fetchPrintableRows() {
+  const { data, error } = await supabase.rpc("printable_residents");
+  if (!error) return data || [];
+  if (!isMissingPrintableRpc(error)) throw error;
+
+  const fallback = await supabase
+    .from("residents")
+    .select(PRINT_SELECT)
+    .order("street_name", { ascending: true })
+    .order("street_number", { ascending: true })
+    .order("unit_no", { ascending: true })
+    .order("last_name", { ascending: true })
+    .order("first_name", { ascending: true });
+  if (fallback.error) throw fallback.error;
+  return (fallback.data || []).map(withName);
+}
+
 export default function PrintableResidentsPage() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -22,16 +59,17 @@ export default function PrintableResidentsPage() {
       setLoading(true);
       setError("");
 
-      const { data, error: rpcError } = await supabase.rpc("printable_residents");
-      if (cancelled) return;
-
-      if (rpcError) {
-        setError(rpcError.message);
+      try {
+        const printableRows = await fetchPrintableRows();
+        if (cancelled) return;
+        setRows(printableRows);
+      } catch (loadError) {
+        if (cancelled) return;
+        setError(loadError.message);
         setRows([]);
-      } else {
-        setRows(data || []);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-      setLoading(false);
     }
 
     loadPrintableRows();
