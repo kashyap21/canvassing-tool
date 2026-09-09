@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../supabaseClient";
-import { normalizeResidentPayload } from "../lib/normalizeResident";
+import { normalizePhone, normalizeResidentPayload } from "../lib/normalizeResident";
 import StreetAutocomplete from "./StreetAutocomplete";
 
 const SUPPORTER_CHOICES = [
@@ -145,39 +145,41 @@ export default function EditResidentModal({ resident, streets, onClose, onSaved 
         {errors._form && <div className="flash flash-error">{errors._form}</div>}
 
         <form className="form-grid" onSubmit={submit} noValidate>
-          <div className="field field-narrow">
-            <label htmlFor="e_street_number">Street number</label>
-            <input
-              id="e_street_number"
-              type="text"
-              inputMode="numeric"
-              value={values.street_number}
-              onChange={(e) => set("street_number", e.target.value)}
-            />
-            {errors.street_number && <span className="err">{errors.street_number}</span>}
-          </div>
-          <div className="field">
-            <label htmlFor="e_street_name">Street name</label>
-            <StreetAutocomplete
-              id="e_street_name"
-              listId="edit-street-options"
-              streets={streets}
-              value={values.street_name}
-              onChange={(v) => set("street_name", v)}
-            />
-            {errors.street_name && <span className="err">{errors.street_name}</span>}
-          </div>
-
-          <div className="field col-full">
-            <label htmlFor="e_unit_no">
-              Unit no. <span className="opt">(optional)</span>
-            </label>
-            <input
-              id="e_unit_no"
-              type="text"
-              value={values.unit_no}
-              onChange={(e) => set("unit_no", e.target.value)}
-            />
+          {/* Matches the add form: number, street and unit on one address line. */}
+          <div className="address-row col-full">
+            <div className="field">
+              <label htmlFor="e_street_number">Street number</label>
+              <input
+                id="e_street_number"
+                type="text"
+                inputMode="numeric"
+                value={values.street_number}
+                onChange={(e) => set("street_number", e.target.value)}
+              />
+              {errors.street_number && <span className="err">{errors.street_number}</span>}
+            </div>
+            <div className="field">
+              <label htmlFor="e_street_name">Street name</label>
+              <StreetAutocomplete
+                id="e_street_name"
+                listId="edit-street-options"
+                streets={streets}
+                value={values.street_name}
+                onChange={(v) => set("street_name", v)}
+              />
+              {errors.street_name && <span className="err">{errors.street_name}</span>}
+            </div>
+            <div className="field">
+              <label htmlFor="e_unit_no">
+                Unit no. <span className="opt">(opt.)</span>
+              </label>
+              <input
+                id="e_unit_no"
+                type="text"
+                value={values.unit_no}
+                onChange={(e) => set("unit_no", e.target.value)}
+              />
+            </div>
           </div>
 
           <label className="na-check col-full">
@@ -222,10 +224,12 @@ export default function EditResidentModal({ resident, streets, onClose, onSaved 
               id="e_cell_number"
               type="tel"
               inputMode="tel"
+              placeholder="555-123-4567"
               className={nameNa ? "is-na" : ""}
               readOnly={nameNa}
               value={values.cell_number}
               onChange={(e) => set("cell_number", e.target.value)}
+              onBlur={(e) => set("cell_number", normalizePhone(e.target.value))}
             />
             {errors.cell_number && <span className="err">{errors.cell_number}</span>}
           </div>
@@ -263,7 +267,7 @@ export default function EditResidentModal({ resident, streets, onClose, onSaved 
           </div>
 
           <div className="field">
-            <label htmlFor="e_number_of_votes">Number of votes</label>
+            <label htmlFor="e_number_of_votes">Number of voters</label>
             <input
               id="e_number_of_votes"
               type="number"

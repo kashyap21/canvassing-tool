@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { findDuplicateGroups, meaningful, mergeResidents, summarizeStreets } from "../lib/duplicates";
 import { findStreetClusters, selectionSummary } from "../lib/streetGroups";
+import EditResidentModal from "./EditResidentModal";
 import StreetAutocomplete from "./StreetAutocomplete";
 
 const SUPPORTER_LABELS = { yes: "Yes", no: "No", unknown: "Unknown" };
@@ -44,6 +45,9 @@ export default function DataCleanupModal({
   const [onlySameName, setOnlySameName] = useState(false);
   const [streetQuery, setStreetQuery] = useState(initialStreetQuery);
   const [renaming, setRenaming] = useState(null); // { key, value }
+  // A duplicate row opened in the full edit form, so a wrong name or address can
+  // be fixed here instead of closing this tool and hunting for it in the table.
+  const [editing, setEditing] = useState(null);
 
   // Bulk rename: the ticked streets and the one name they should all become.
   const [selected, setSelected] = useState(() => new Set());
@@ -51,11 +55,12 @@ export default function DataCleanupModal({
 
   useEffect(() => {
     const onKey = (e) => {
-      if (e.key === "Escape") onClose();
+      // While the edit form is open on top, Escape belongs to it alone.
+      if (e.key === "Escape" && !editing) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, editing]);
 
   const groups = useMemo(() => findDuplicateGroups(rows), [rows]);
   const streets = useMemo(() => summarizeStreets(rows), [rows]);
@@ -276,7 +281,7 @@ export default function DataCleanupModal({
             <p className="sub">
               {groups.length === 0
                 ? "No repeated addresses found."
-                : `${groups.length} address${groups.length === 1 ? "" : "es"} recorded more than once — ${duplicateRowCount} extra entr${duplicateRowCount === 1 ? "y" : "ies"}. Merging keeps the entry you tick and fills its blanks from the others; votes are never added together.`}
+                : `${groups.length} address${groups.length === 1 ? "" : "es"} recorded more than once — ${duplicateRowCount} extra entr${duplicateRowCount === 1 ? "y" : "ies"}. Merging keeps the entry you tick and fills its blanks from the others; voters are never added together.`}
             </p>
 
             {groups.length > 0 && (
@@ -310,7 +315,7 @@ export default function DataCleanupModal({
                           <th>Unit</th>
                           <th>Cell</th>
                           <th>Supporter</th>
-                          <th>Votes</th>
+                          <th>Voters</th>
                           <th>Added</th>
                           <th aria-label="Actions"></th>
                         </tr>
@@ -340,14 +345,24 @@ export default function DataCleanupModal({
                             <td>{row.number_of_votes}</td>
                             <td>{new Date(row.created_at).toLocaleDateString()}</td>
                             <td className="col-actions">
-                              <button
-                                type="button"
-                                className="btn btn-delete"
-                                disabled={!online || busyKey === `${group.key}:${row.id}`}
-                                onClick={() => deleteRow(group, row)}
-                              >
-                                {busyKey === `${group.key}:${row.id}` ? "Deleting…" : "Delete"}
-                              </button>
+                              <div className="row-actions">
+                                <button
+                                  type="button"
+                                  className="btn btn-edit"
+                                  disabled={!online}
+                                  onClick={() => setEditing(row)}
+                                >
+                                  Edit
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-delete"
+                                  disabled={!online || busyKey === `${group.key}:${row.id}`}
+                                  onClick={() => deleteRow(group, row)}
+                                >
+                                  {busyKey === `${group.key}:${row.id}` ? "Deleting…" : "Delete"}
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -556,6 +571,24 @@ export default function DataCleanupModal({
             Done
           </button>
         </div>
+
+        {/* Sits on top of this tool; the overlay is fixed, so it covers the
+            screen even though it lives inside the clean-up dialog. */}
+        {editing && (
+          <EditResidentModal
+            resident={editing}
+            streets={streetLabels}
+            onClose={() => setEditing(null)}
+            onSaved={(updated) => {
+              onApplied({ updated: [updated], removedIds: [] });
+              setEditing(null);
+              setError("");
+              setFlash(
+                `Saved changes to ${residentName(updated) || "the entry"} at ${[updated.street_number, updated.street_name].filter(Boolean).join(" ")}.`,
+              );
+            }}
+          />
+        )}
       </div>
     </div>
   );

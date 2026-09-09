@@ -11,7 +11,7 @@ export const CSV_COLUMNS = [
   ["cell_number", "Cell Number"],
   ["email", "Email"],
   ["supporter", "Supporter"],
-  ["number_of_votes", "Number Of Votes"],
+  ["number_of_votes", "Number Of Voters"],
   ["lawn_sign", "Wants A Lawn Sign"],
   ["newsletter_consent", "Agrees To Receive Further Communication / Newsletter / Updates"],
   ["comments", "Other Comments"],

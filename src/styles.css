@@ -224,6 +224,89 @@ form.form-grid > * { min-width: 0; }
 label { display: block; font-weight: 600; font-size: 20px; margin-bottom: 8px; }
 .opt { color: var(--muted); font-weight: 400; }
 
+/* Street number + street name + unit, always on one line. The number and unit
+   are held to a fixed width so the street name takes whatever is left. */
+.address-row {
+    display: grid;
+    /* The number and unit are only ever a few characters, so they get just
+       enough room and the street name keeps the rest. */
+    grid-template-columns: 72px minmax(0, 1fr) 64px;
+    gap: 8px;
+    align-items: start;
+}
+.address-row > .field { margin: 0; min-width: 0; }
+/* "Street number" / "Unit no." wrap to a second line on a phone; the reserved
+   height keeps the three inputs level with each other. */
+.address-row label { font-size: 16px; min-height: 48px; }
+.address-row .opt { display: none; } /* no room for "(opt.)" beside a 64px box */
+.address-row input { font-size: 19px; }
+.address-row > .field:first-child input,
+.address-row > .field:last-child input { padding: 0 8px; text-align: center; }
+
+/* Very narrow phones (iPhone SE and similar): claw back every pixel for the
+   street name, which is the only field here that holds a long value. */
+@media (max-width: 359px) {
+    .address-row { grid-template-columns: 58px minmax(0, 1fr) 56px; gap: 6px; }
+    .address-row label { font-size: 14px; min-height: 42px; }
+    .address-row input { font-size: 17px; }
+    .address-row > .field:first-child input,
+    .address-row > .field:last-child input { padding: 0 4px; }
+}
+
+/* In a browser window all three labels fit on one line, so the row is capped
+   rather than stretched: three sensibly-sized boxes across one span. */
+@media (min-width: 720px) {
+    .address-row {
+        grid-template-columns: 170px minmax(0, 1fr) 175px;
+        gap: 20px;
+        max-width: 760px;
+    }
+    .address-row label { font-size: 20px; min-height: 0; white-space: nowrap; }
+    .address-row .opt { display: inline; }
+    .address-row input { font-size: 22px; }
+    .address-row > .field:first-child input,
+    .address-row > .field:last-child input { padding: 0 16px; text-align: left; }
+}
+
+/* First name + last name + cell number on one line, matching the order of the
+   paper tables. On a phone three boxes would leave none of them usable, so the
+   two names share the top line and the cell number — the longest value of the
+   three — takes the full width beneath them. */
+.name-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px 12px;
+    align-items: start;
+}
+.name-row > .field { margin: 0; min-width: 0; }
+.name-row > .field:last-child { grid-column: 1 / -1; }
+.name-row label { white-space: nowrap; }
+/* "(optional)" three times over doesn't fit beside three boxes; the labels
+   already read as optional next to the required address above. */
+.name-row .opt { display: none; }
+
+/* From a tablet up there is room for all three across one line. */
+@media (min-width: 720px) {
+    .name-row {
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(200px, 260px);
+        gap: 20px;
+    }
+    .name-row > .field:last-child { grid-column: auto; }
+}
+
+/* Only on a full-size window is there room for the labels to carry
+   "(optional)" without crowding the box beside them. */
+@media (min-width: 1000px) {
+    .name-row .opt { display: inline; }
+}
+
+/* Very narrow phones: the "(optional)" text is already gone, so just tighten
+   the gap between the two name boxes. */
+@media (max-width: 359px) {
+    .name-row { gap: 12px 8px; }
+    .name-row label { font-size: 18px; }
+}
+
 input[type="text"],
 input[type="email"],
 input[type="number"],
@@ -417,9 +500,13 @@ input.is-na { color: var(--muted); background: #f0f2f5; cursor: not-allowed; }
     border-top: 1px solid var(--line);
 }
 .recent li:first-child { border-top: none; }
+/* Name and address on the left, then the voter count and an Edit button held
+   together at the right-hand end of the row. */
+.recent li { grid-template-columns: 1fr auto auto; }
 .r-name { font-weight: 600; }
 .r-addr { grid-row: 2; color: var(--muted); font-size: 16px; }
 .r-votes { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--accent); font-weight: 600; white-space: nowrap; }
+.r-edit { grid-column: 3; grid-row: 1 / span 2; align-self: center; }
 
 /* Data list: buttons */
 .btn {
@@ -509,6 +596,78 @@ select:focus {
 /* Clear / export actions */
 .list-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; }
 .list-actions .export-btn { margin-left: auto; }
+
+/* Dedicated printable resident data route */
+.print-data-page {
+    max-width: 1400px;
+    background: #fff;
+}
+.print-data-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.print-data-actions a { text-decoration: none; display: inline-flex; align-items: center; }
+.print-data-sheet {
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 24px;
+    color: #111;
+}
+.print-data-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+.print-data-head h1 {
+    margin: 0;
+    font-size: 28px;
+    letter-spacing: 0;
+}
+.print-data-head p {
+    margin: 0;
+    color: #4b5563;
+    font-size: 15px;
+    font-weight: 700;
+}
+.print-data-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 13px;
+}
+.print-data-table th,
+.print-data-table td {
+    padding: 7px 8px;
+    border: 1px solid #c8ced6;
+    text-align: left;
+    vertical-align: top;
+}
+.print-data-table th {
+    background: #eef1f4;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.print-data-table td {
+    overflow-wrap: anywhere;
+}
+.print-data-table th:nth-child(1) { width: 8%; }
+.print-data-table th:nth-child(2) { width: 20%; }
+.print-data-table th:nth-child(3) { width: 8%; }
+.print-data-table th:nth-child(4) { width: 20%; }
+.print-data-table th:nth-child(5) { width: 14%; }
+.print-data-table th:nth-child(6) { width: 30%; }
+.print-data-table .empty {
+    padding: 24px;
+    text-align: center;
+    color: #5b6672;
+}
+.print-data-error { margin-bottom: 16px; }
 
 /* Pagination */
 .pager {
@@ -754,4 +913,207 @@ table.data td.col-actions { text-align: right; }
     .street-variant { text-decoration-color: #ff9d92; }
     .street-suggest { background: rgba(31, 111, 235, 0.12); }
     .street-row.is-ticked { background: rgba(31, 111, 235, 0.14); }
+}
+
+.print-sheet { display: none; }
+
+@media print {
+    @page {
+        size: legal landscape;
+        margin: 0.35in;
+    }
+
+    html,
+    body,
+    #root,
+    .page {
+        width: 100%;
+        min-height: 0;
+        margin: 0;
+        padding: 0;
+        background: #fff;
+        color: #000;
+    }
+
+    .page { max-width: none; }
+    .page:not(.print-data-page) > :not(.print-sheet) { display: none !important; }
+
+    .print-sheet {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        height: auto;
+        max-height: 7.35in;
+        margin: 0;
+        padding: 0;
+        color: #000;
+        background: #fff;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 10pt;
+        line-height: 1.2;
+        break-after: avoid;
+    }
+
+    .print-sheet-head {
+        display: flex;
+        align-items: flex-end;
+        justify-content: space-between;
+        gap: 0.4in;
+        min-height: 0.52in;
+        margin-bottom: 0.18in;
+    }
+
+    .print-sheet-head h1 {
+        margin: 0;
+        font-size: 15pt;
+        line-height: 1;
+        letter-spacing: 0;
+    }
+
+    .print-sheet-meta {
+        display: grid;
+        grid-template-columns: 1.8in 3.5in;
+        gap: 0.24in;
+        font-size: 10pt;
+        font-weight: 700;
+    }
+
+    .print-sheet-meta span {
+        display: block;
+        padding: 0 0 0.12in;
+        border-bottom: 1px solid #000;
+    }
+
+    .print-sheet-table {
+        width: 100%;
+        flex: 0 0 auto;
+        border-collapse: collapse;
+        table-layout: fixed;
+        border: 1.5px solid #000;
+    }
+
+    .print-notes-box {
+        flex: 0 0 auto;
+        min-height: 0.75in;
+        margin-top: 0.14in;
+        padding: 0.08in 0.1in;
+        border: 1.5px solid #000;
+        background: #fff;
+    }
+
+    .print-notes-box h2 {
+        margin: 0;
+        font-size: 10pt;
+        line-height: 1;
+        letter-spacing: 0;
+    }
+
+    .print-sheet-table th,
+    .print-sheet-table td {
+        border: 1px solid #000;
+        vertical-align: middle;
+        background: #fff;
+    }
+
+    .print-sheet-table th {
+        height: 0.32in;
+        padding: 0.03in 0.04in;
+        text-align: center;
+        font-size: 8.5pt;
+        line-height: 1.05;
+        font-weight: 700;
+        white-space: normal;
+    }
+
+    .print-sheet-table td {
+        height: 0.7in;
+        padding: 0.03in 0.04in;
+    }
+
+    .sheet-street-number { width: 6%; }
+    .sheet-street-name { width: 27%; }
+    .sheet-first-name { width: 20%; }
+    .sheet-last-name { width: 20%; }
+    .sheet-phone { width: 19%; }
+    .sheet-voters { width: 4%; }
+    .sheet-lawn-sign { width: 4%; }
+
+    .print-phone-format {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr auto 1.3fr;
+        align-items: center;
+        height: 100%;
+        color: #000;
+        font-size: 13pt;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    .print-phone-format strong {
+        padding: 0 0.05in;
+        font: inherit;
+    }
+
+    .print-checkbox {
+        display: block;
+        width: 0.22in;
+        height: 0.22in;
+        margin: 0 auto;
+        border: 1.5px solid #000;
+    }
+
+    .print-data-page {
+        max-width: none;
+        padding: 0;
+        background: #fff;
+    }
+
+    .print-data-actions {
+        display: none !important;
+    }
+
+    .print-data-sheet {
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        color: #000;
+    }
+
+    .print-data-head {
+        margin-bottom: 0.14in;
+    }
+
+    .print-data-head h1 {
+        font-size: 16pt;
+        line-height: 1;
+    }
+
+    .print-data-head p {
+        color: #000;
+        font-size: 9pt;
+    }
+
+    .print-data-table {
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 8.5pt;
+        line-height: 1.15;
+        page-break-inside: auto;
+    }
+
+    .print-data-table tr {
+        break-inside: avoid;
+        page-break-inside: avoid;
+    }
+
+    .print-data-table th,
+    .print-data-table td {
+        padding: 0.04in 0.05in;
+        border: 1px solid #000;
+        color: #000;
+        background: #fff;
+    }
+
+    .print-data-table th {
+        font-size: 7.5pt;
+    }
 }

@@ -5,6 +5,7 @@ import { normalizeStreetPart } from "../lib/normalizeResident";
 import { findDuplicateGroups } from "../lib/duplicates";
 import DataCleanupModal from "./DataCleanupModal";
 import EditResidentModal from "./EditResidentModal";
+import PrintableCanvassSheet from "./PrintableCanvassSheet";
 
 const PAGE = 1000; // Supabase returns at most 1000 rows per request.
 const SUPPORTER_LABELS = { yes: "Yes", no: "No", unknown: "Unknown" };
@@ -271,234 +272,248 @@ export default function ResidentsList({ online, refreshKey }) {
   }
 
   return (
-    <div className="card">
-      <header className="card-head">
-        <h1>Residents</h1>
-        <p className="sub">
-          {loading
-            ? "Loading…"
-            : filtersActive
-              ? `${filtered.length} of ${allRows.length} residents`
-              : `${allRows.length} resident${allRows.length === 1 ? "" : "s"}`}
-        </p>
-      </header>
+    <>
+      <div className="card">
+        <header className="card-head">
+          <h1>Residents</h1>
+          <p className="sub">
+            {loading
+              ? "Loading…"
+              : filtersActive
+                ? `${filtered.length} of ${allRows.length} residents`
+                : `${allRows.length} resident${allRows.length === 1 ? "" : "s"}`}
+          </p>
+        </header>
 
-      {error && <div className="flash flash-error">{error}</div>}
+        {error && <div className="flash flash-error">{error}</div>}
 
-      <div className="filters">
-        <div className="filter filter-search">
-          <label htmlFor="f-search">Search</label>
-          <input
-            id="f-search"
-            type="text"
-            placeholder="Name, address, phone, email…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-
-        <div className="filter">
-          <label htmlFor="f-street">Street</label>
-          <select id="f-street" value={street} onChange={(e) => setStreet(e.target.value)}>
-            <option value="">All streets</option>
-            {streets.map((s) => (
-              <option key={s} value={s}>
-                {s} ({streetCounts.get(s)})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="filter">
-          <label htmlFor="f-supporter">Supporter</label>
-          <select
-            id="f-supporter"
-            value={supporter}
-            onChange={(e) => setSupporter(e.target.value)}
-          >
-            <option value="">All</option>
-            <option value="yes">Yes</option>
-            <option value="no">No</option>
-            <option value="unknown">Unknown</option>
-          </select>
-        </div>
-
-        <div className="filter">
-          <label htmlFor="f-sign">Lawn sign</label>
-          <select id="f-sign" value={sign} onChange={(e) => setSign(e.target.value)}>
-            <option value="">All</option>
-            <option value="yes">Has sign</option>
-            <option value="no">No sign</option>
-          </select>
-        </div>
-
-        <label className="na-toggle">
-          <input type="checkbox" checked={hideNa} onChange={(e) => setHideNa(e.target.checked)} />
-          <span>Hide N/A</span>
-        </label>
-      </div>
-
-      <div className="list-actions">
-        <button
-          type="button"
-          className="btn btn-ghost"
-          onClick={clearFilters}
-          disabled={!filtersActive}
-        >
-          Clear filters
-        </button>
-        <button
-          type="button"
-          className="btn"
-          onClick={() => loadRows()}
-          disabled={!online || loading || refreshing}
-        >
-          {refreshing ? "Refreshing..." : "Refresh"}
-        </button>
-        <button
-          type="button"
-          className="btn"
-          disabled={loading || allRows.length === 0}
-          // Opens on the street tab, narrowed to the street being filtered on, so
-          // renaming everything on one street is two clicks from the table.
-          onClick={() => setCleanup({ tab: "streets", streetQuery: street })}
-        >
-          Edit street names{street ? ` (${street})` : ""}
-        </button>
-        <button
-          type="button"
-          className={duplicateGroupCount > 0 ? "btn btn-alert" : "btn"}
-          disabled={loading || allRows.length === 0}
-          onClick={() => setCleanup({ tab: "duplicates", streetQuery: "" })}
-        >
-          Clean up{duplicateGroupCount > 0 ? ` (${duplicateGroupCount} duplicates)` : ""}
-        </button>
-        <button
-          type="button"
-          className="btn btn-primary export-btn"
-          disabled={loading || filtered.length === 0}
-          onClick={() => downloadCsv(filtered)}
-        >
-          Export CSV{filtersActive ? " (filtered)" : ""}
-        </button>
-      </div>
-
-      <div className="table-wrap">
-        <table className="data">
-          <thead>
-            <tr>
-              {sortableHeader("street_number", "Street #")}
-              {sortableHeader("street_name", "Street Name")}
-              {sortableHeader("unit_no", "Unit")}
-              {sortableHeader("name", "Name")}
-              {sortableHeader("cell_number", "Cell")}
-              {sortableHeader("supporter", "Supporter")}
-              {sortableHeader("number_of_votes", "Votes")}
-              {sortableHeader("lawn_sign", "Sign")}
-              {sortableHeader("newsletter_consent", "News")}
-              {sortableHeader("created_at", "Added")}
-              <th aria-label="Actions"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {pageRows.map((r) => (
-              <tr key={r.id}>
-                <td>{r.street_number}</td>
-                <td>{r.street_name}</td>
-                <td>{r.unit_no || ""}</td>
-                <td>{residentName(r)}</td>
-                <td>{r.cell_number}</td>
-                <td>{SUPPORTER_LABELS[r.supporter] || r.supporter}</td>
-                <td>{r.number_of_votes}</td>
-                <td>{r.lawn_sign ? "Yes" : "No"}</td>
-                <td>{r.newsletter_consent ? "Yes" : "No"}</td>
-                <td>{new Date(r.created_at).toLocaleString()}</td>
-                <td className="col-actions">
-                  <div className="row-actions">
-                    <button type="button" className="btn btn-edit" onClick={() => setEditing(r)}>
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-delete"
-                      disabled={!online || deletingId === r.id}
-                      onClick={() => handleDelete(r)}
-                    >
-                      {deletingId === r.id ? "Deleting..." : "Delete"}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-            {!loading && filtered.length === 0 && (
-              <tr>
-                <td colSpan="11" className="empty">
-                  {allRows.length === 0 ? "No residents yet." : "No residents match these filters."}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-
-      {filtered.length > 0 && (
-        <div className="pager">
-          <span className="pager-status">
-            {start + 1}–{Math.min(start + pageSize, filtered.length)} of {filtered.length}
-          </span>
-          <div className="pager-controls">
-            <label className="page-size">
-              <span>Rows</span>
-              <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
-                {PAGE_SIZES.map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <button
-              type="button"
-              className="btn"
-              disabled={safePage <= 1}
-              onClick={() => setPage(safePage - 1)}
-            >
-              ‹ Prev
-            </button>
-            <span className="pager-page">
-              Page {safePage} / {totalPages}
-            </span>
-            <button
-              type="button"
-              className="btn"
-              disabled={safePage >= totalPages}
-              onClick={() => setPage(safePage + 1)}
-            >
-              Next ›
-            </button>
+        <div className="filters">
+          <div className="filter filter-search">
+            <label htmlFor="f-search">Search</label>
+            <input
+              id="f-search"
+              type="text"
+              placeholder="Name, address, phone, email…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </div>
+
+          <div className="filter">
+            <label htmlFor="f-street">Street</label>
+            <select id="f-street" value={street} onChange={(e) => setStreet(e.target.value)}>
+              <option value="">All streets</option>
+              {streets.map((s) => (
+                <option key={s} value={s}>
+                  {s} ({streetCounts.get(s)})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="filter">
+            <label htmlFor="f-supporter">Supporter</label>
+            <select
+              id="f-supporter"
+              value={supporter}
+              onChange={(e) => setSupporter(e.target.value)}
+            >
+              <option value="">All</option>
+              <option value="yes">Yes</option>
+              <option value="no">No</option>
+              <option value="unknown">Unknown</option>
+            </select>
+          </div>
+
+          <div className="filter">
+            <label htmlFor="f-sign">Lawn sign</label>
+            <select id="f-sign" value={sign} onChange={(e) => setSign(e.target.value)}>
+              <option value="">All</option>
+              <option value="yes">Has sign</option>
+              <option value="no">No sign</option>
+            </select>
+          </div>
+
+          <label className="na-toggle">
+            <input type="checkbox" checked={hideNa} onChange={(e) => setHideNa(e.target.checked)} />
+            <span>Hide N/A</span>
+          </label>
         </div>
-      )}
 
-      {editing && (
-        <EditResidentModal
-          resident={editing}
-          streets={streets}
-          onClose={() => setEditing(null)}
-          onSaved={handleSaved}
-        />
-      )}
+        <div className="list-actions">
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={clearFilters}
+            disabled={!filtersActive}
+          >
+            Clear filters
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => loadRows()}
+            disabled={!online || loading || refreshing}
+          >
+            {refreshing ? "Refreshing..." : "Refresh"}
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={loading || allRows.length === 0}
+            // Opens on the street tab, narrowed to the street being filtered on, so
+            // renaming everything on one street is two clicks from the table.
+            onClick={() => setCleanup({ tab: "streets", streetQuery: street })}
+          >
+            Edit street names{street ? ` (${street})` : ""}
+          </button>
+          <button
+            type="button"
+            className={duplicateGroupCount > 0 ? "btn btn-alert" : "btn"}
+            disabled={loading || allRows.length === 0}
+            onClick={() => setCleanup({ tab: "duplicates", streetQuery: "" })}
+          >
+            Clean up{duplicateGroupCount > 0 ? ` (${duplicateGroupCount} duplicates)` : ""}
+          </button>
+          <button type="button" className="btn" onClick={() => window.print()}>
+            Print blank sheet
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={loading || allRows.length === 0}
+            onClick={() => window.open(`${window.location.pathname}${window.location.search}#/data/print`, "_blank", "noopener")}
+          >
+            Print data
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary export-btn"
+            disabled={loading || filtered.length === 0}
+            onClick={() => downloadCsv(filtered)}
+          >
+            Export CSV{filtersActive ? " (filtered)" : ""}
+          </button>
+        </div>
 
-      {cleanup && (
-        <DataCleanupModal
-          rows={allRows}
-          online={online}
-          initialTab={cleanup.tab}
-          initialStreetQuery={cleanup.streetQuery}
-          onClose={() => setCleanup(null)}
-          onApplied={handleCleanupApplied}
-        />
-      )}
-    </div>
+        <div className="table-wrap">
+          <table className="data">
+            <thead>
+              <tr>
+                {sortableHeader("street_number", "Street #")}
+                {sortableHeader("street_name", "Street Name")}
+                {sortableHeader("unit_no", "Unit")}
+                {sortableHeader("name", "Name")}
+                {sortableHeader("cell_number", "Cell")}
+                {sortableHeader("supporter", "Supporter")}
+                {sortableHeader("number_of_votes", "Voters")}
+                {sortableHeader("lawn_sign", "Sign")}
+                {sortableHeader("newsletter_consent", "News")}
+                {sortableHeader("created_at", "Added")}
+                <th aria-label="Actions"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {pageRows.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.street_number}</td>
+                  <td>{r.street_name}</td>
+                  <td>{r.unit_no || ""}</td>
+                  <td>{residentName(r)}</td>
+                  <td>{r.cell_number}</td>
+                  <td>{SUPPORTER_LABELS[r.supporter] || r.supporter}</td>
+                  <td>{r.number_of_votes}</td>
+                  <td>{r.lawn_sign ? "Yes" : "No"}</td>
+                  <td>{r.newsletter_consent ? "Yes" : "No"}</td>
+                  <td>{new Date(r.created_at).toLocaleString()}</td>
+                  <td className="col-actions">
+                    <div className="row-actions">
+                      <button type="button" className="btn btn-edit" onClick={() => setEditing(r)}>
+                        Edit
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-delete"
+                        disabled={!online || deletingId === r.id}
+                        onClick={() => handleDelete(r)}
+                      >
+                        {deletingId === r.id ? "Deleting..." : "Delete"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+              {!loading && filtered.length === 0 && (
+                <tr>
+                  <td colSpan="11" className="empty">
+                    {allRows.length === 0 ? "No residents yet." : "No residents match these filters."}
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {filtered.length > 0 && (
+          <div className="pager">
+            <span className="pager-status">
+              {start + 1}–{Math.min(start + pageSize, filtered.length)} of {filtered.length}
+            </span>
+            <div className="pager-controls">
+              <label className="page-size">
+                <span>Rows</span>
+                <select value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))}>
+                  {PAGE_SIZES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                className="btn"
+                disabled={safePage <= 1}
+                onClick={() => setPage(safePage - 1)}
+              >
+                ‹ Prev
+              </button>
+              <span className="pager-page">
+                Page {safePage} / {totalPages}
+              </span>
+              <button
+                type="button"
+                className="btn"
+                disabled={safePage >= totalPages}
+                onClick={() => setPage(safePage + 1)}
+              >
+                Next ›
+              </button>
+            </div>
+          </div>
+        )}
+
+        {editing && (
+          <EditResidentModal
+            resident={editing}
+            streets={streets}
+            onClose={() => setEditing(null)}
+            onSaved={handleSaved}
+          />
+        )}
+
+        {cleanup && (
+          <DataCleanupModal
+            rows={allRows}
+            online={online}
+            initialTab={cleanup.tab}
+            initialStreetQuery={cleanup.streetQuery}
+            onClose={() => setCleanup(null)}
+            onApplied={handleCleanupApplied}
+          />
+        )}
+      </div>
+      <PrintableCanvassSheet />
+    </>
   );
 }

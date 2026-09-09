@@ -4,12 +4,14 @@ import HeaderStats from "./components/HeaderStats";
 import Login from "./components/Login";
 import ResidentForm from "./components/ResidentForm";
 import ResidentsList from "./components/ResidentsList";
+import PrintableResidentsPage from "./components/PrintableResidentsPage";
 import { flushPendingResidents, getPendingResidentCount } from "./lib/offlineQueue";
 
 export default function App() {
   const [session, setSession] = useState(null);
   const [ready, setReady] = useState(false);
   const [view, setView] = useState("add"); // "add" | "data"
+  const [route, setRoute] = useState(() => window.location.hash || "#/");
 
   // Data the form needs: known streets, header counters, recent entries.
   const [streets, setStreets] = useState([]);
@@ -34,6 +36,20 @@ export default function App() {
     return () => sub.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    function handleHashChange() {
+      setRoute(window.location.hash || "#/");
+    }
+
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
+
+  useEffect(() => {
+    if (route === "#/data") setView("data");
+    if (route === "#/" || route === "#/add") setView("add");
+  }, [route]);
+
   const refresh = useCallback(async () => {
     if (!session) return;
     const [streetsRes, statsRes, recentRes] = await Promise.all([
@@ -41,7 +57,13 @@ export default function App() {
       supabase.rpc("resident_stats"),
       supabase
         .from("residents")
-        .select("id, first_name, last_name, street_number, street_name, unit_no, number_of_votes")
+        // Every editable column, not just the ones on show: the Edit button in
+        // "Recently added" opens this row straight into the edit form, and a
+        // partial row would save blanks over the columns it never fetched.
+        .select(
+          "id, created_at, street_number, street_name, unit_no, first_name, last_name, " +
+            "cell_number, email, supporter, number_of_votes, lawn_sign, newsletter_consent, comments",
+        )
         .order("created_at", { ascending: false })
         .limit(8),
     ]);
@@ -150,19 +172,29 @@ export default function App() {
     );
   }
 
+  if (route === "#/data/print") {
+    return <PrintableResidentsPage />;
+  }
+
   return (
     <main className="page">
       <nav className="topbar">
         <div className="tabs">
           <button
             className={view === "add" ? "tab active" : "tab"}
-            onClick={() => setView("add")}
+            onClick={() => {
+              window.location.hash = "#/add";
+              setView("add");
+            }}
           >
             Add
           </button>
           <button
             className={view === "data" ? "tab active" : "tab"}
-            onClick={() => setView("data")}
+            onClick={() => {
+              window.location.hash = "#/data";
+              setView("data");
+            }}
           >
             Data
           </button>

@@ -102,3 +102,33 @@ as $$
            coalesce(sum(number_of_votes), 0)::bigint
     from public.residents;
 $$;
+
+-- ---------------------------------------------------------------------------
+-- 5. Printable data endpoint.
+--    This is intentionally narrower than the editable/export views: it returns
+--    only the columns needed on the paper copy.
+-- ---------------------------------------------------------------------------
+create or replace function public.printable_residents()
+    returns table (
+        street_number text,
+        street_name text,
+        unit_no text,
+        name text,
+        cell_number text,
+        comments text
+    )
+    language sql
+    stable
+    security invoker
+    set search_path = public
+as $$
+    select
+        street_number,
+        street_name,
+        unit_no,
+        trim(concat_ws(' ', nullif(first_name, ''), nullif(last_name, ''))) as name,
+        cell_number,
+        comments
+    from public.residents
+    order by street_name, street_number, unit_no, last_name, first_name;
+$$;

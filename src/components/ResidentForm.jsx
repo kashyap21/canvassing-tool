@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { supabase } from "../supabaseClient";
 import { isRetryableNetworkError, queueResident } from "../lib/offlineQueue";
-import { normalizeResidentPayload } from "../lib/normalizeResident";
+import { normalizePhone, normalizeResidentPayload } from "../lib/normalizeResident";
 import { findAddressMatches, formatAddress, meaningful, normalizeStreetNumber } from "../lib/duplicates";
 import StreetAutocomplete from "./StreetAutocomplete";
+import EditResidentModal from "./EditResidentModal";
 
 const SUPPORTER_CHOICES = [
   ["yes", "Yes"],
@@ -61,11 +62,15 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
   const [dupBlocked, setDupBlocked] = useState(false);
   const dupRequestRef = useRef(0);
 
-  // Until the canvasser types a number of their own, the vote count follows the
-  // supporter answer: 0 for an unknown door, 1 once they say yes or no. Typing a
-  // number takes over, so a hand-entered "3" is never overwritten by a later
-  // change of supporter.
+  // The supporter answer and the voter count fill each other in, so a fast
+  // typist only has to enter one of them. Whichever field the canvasser touches
+  // wins: a hand-entered "3" is never overwritten by a later change of
+  // supporter, and a deliberate Yes/No is never overwritten by a typed count.
   const [votesEdited, setVotesEdited] = useState(false);
+  const [supporterEdited, setSupporterEdited] = useState(false);
+
+  // The row open in the edit dialog, opened from "Recently added".
+  const [editing, setEditing] = useState(null);
 
   // Ask the database whether this address is already recorded, ~1/3 s after the
   // typist stops. Only rows with the same street number come back, so this stays
@@ -115,10 +120,24 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
   }
 
   function setSupporter(value) {
+    setSupporterEdited(true);
     setValues((v) => ({
       ...v,
       supporter: value,
-      ...(votesEdited ? {} : { number_of_votes: value === "unknown" ? 0 : 1 }),
+      // 1 once they say yes, 0 for a no or an unknown door.
+      ...(votesEdited ? {} : { number_of_votes: value === "yes" ? 1 : 0 }),
+    }));
+  }
+
+  function setVotes(raw) {
+    setVotesEdited(true);
+    setValues((v) => ({
+      ...v,
+      number_of_votes: raw,
+      // Typing a count is itself an answer to "Supporter?", so fill it in and
+      // save the click. An explicit choice is left alone — a deliberate "No"
+      // next to a count is a contradiction only the canvasser can settle.
+      ...(!supporterEdited && Number(raw) > 0 ? { supporter: "yes" } : {}),
     }));
   }
 
@@ -128,6 +147,7 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
     setNameNa(false);
     setErrors({});
     setVotesEdited(false);
+    setSupporterEdited(false);
     document.getElementById("street_number")?.focus();
   }
 
@@ -232,45 +252,50 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
         {errors._form && <div className="flash flash-error">{errors._form}</div>}
 
         <form className="form-grid" onSubmit={submit} noValidate>
-          <div className="field field-narrow">
-            <label htmlFor="street_number">Street number</label>
-            <input
-              id="street_number"
-              type="text"
-              inputMode="numeric"
-              placeholder="e.g. 123"
-              autoFocus
-              value={values.street_number}
-              onChange={(e) => set("street_number", e.target.value)}
-            />
-            {errors.street_number && <span className="err">{errors.street_number}</span>}
+          {/* One address line: number, street, unit. On a phone the labels wrap
+              to two lines rather than shrinking the boxes. */}
+          <div className="address-row col-full">
+            <div className="field">
+              <label htmlFor="street_number">Street number</label>
+              <input
+                id="street_number"
+                type="text"
+                inputMode="numeric"
+                placeholder="123"
+                autoFocus
+                value={values.street_number}
+                onChange={(e) => set("street_number", e.target.value)}
+              />
+              {errors.street_number && <span className="err">{errors.street_number}</span>}
+            </div>
+            <div className="field">
+              <label htmlFor="street_name">Street name</label>
+              <StreetAutocomplete
+                id="street_name"
+                listId="street-options"
+                placeholder="e.g. Maple Street"
+                streets={streets}
+                value={values.street_name}
+                onChange={(v) => set("street_name", v)}
+              />
+              {errors.street_name && <span className="err">{errors.street_name}</span>}
+            </div>
+            <div className="field">
+              <label htmlFor="unit_no">
+                Unit no. <span className="opt">(opt.)</span>
+              </label>
+              <input
+                id="unit_no"
+                type="text"
+                placeholder="Apt"
+                value={values.unit_no}
+                onChange={(e) => set("unit_no", e.target.value)}
+              />
+            </div>
           </div>
-          <div className="field">
-            <label htmlFor="street_name">Street name</label>
-            <StreetAutocomplete
-              id="street_name"
-              listId="street-options"
-              placeholder="e.g. Maple Street"
-              streets={streets}
-              value={values.street_name}
-              onChange={(v) => set("street_name", v)}
-            />
-            <span className="hint">Start typing — streets you entered before will appear.</span>
-            {errors.street_name && <span className="err">{errors.street_name}</span>}
-          </div>
-
-          <div className="field col-full">
-            <label htmlFor="unit_no">
-              Unit no. <span className="opt">(optional)</span>
-            </label>
-            <input
-              id="unit_no"
-              type="text"
-              placeholder="Apt / unit (optional)"
-              value={values.unit_no}
-              onChange={(e) => set("unit_no", e.target.value)}
-            />
-          </div>
+          <span className="hint col-full">
+            Street name: start typing — streets you entered before will appear.
+          </span>
 
           {dupChecking && dup.exact.length === 0 && (
             <p className="dup-checking col-full">Checking for duplicates…</p>
@@ -320,67 +345,59 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
             <span>No details given — mark name, phone &amp; email as N/A</span>
           </label>
 
-          <div className="field">
-            <label htmlFor="first_name">
-              First name <span className="opt">(optional)</span>
-            </label>
-            <input
-              id="first_name"
-              type="text"
-              placeholder="First name"
-              className={nameNa ? "is-na" : ""}
-              readOnly={nameNa}
-              value={values.first_name}
-              onChange={(e) => set("first_name", e.target.value)}
-            />
-            {errors.first_name && <span className="err">{errors.first_name}</span>}
-          </div>
-          <div className="field">
-            <label htmlFor="last_name">
-              Last name <span className="opt">(optional)</span>
-            </label>
-            <input
-              id="last_name"
-              type="text"
-              placeholder="Last name"
-              className={nameNa ? "is-na" : ""}
-              readOnly={nameNa}
-              value={values.last_name}
-              onChange={(e) => set("last_name", e.target.value)}
-            />
-            {errors.last_name && <span className="err">{errors.last_name}</span>}
-          </div>
-
-          <div className="field">
-            <label htmlFor="cell_number">
-              Cell number <span className="opt">(optional)</span>
-            </label>
-            <input
-              id="cell_number"
-              type="tel"
-              inputMode="tel"
-              placeholder="(555) 123-4567"
-              className={nameNa ? "is-na" : ""}
-              readOnly={nameNa}
-              value={values.cell_number}
-              onChange={(e) => set("cell_number", e.target.value)}
-            />
-            {errors.cell_number && <span className="err">{errors.cell_number}</span>}
-          </div>
-          <div className="field">
-            <label htmlFor="email">
-              Email <span className="opt">(optional)</span>
-            </label>
-            <input
-              id="email"
-              type="email"
-              placeholder="name@example.com (optional)"
-              className={nameNa ? "is-na" : ""}
-              readOnly={nameNa}
-              value={values.email}
-              onChange={(e) => set("email", e.target.value)}
-            />
-            {errors.email && <span className="err">{errors.email}</span>}
+          {/* Name, name, phone across one line — the same order as the paper
+              tables, so a typist reads straight across instead of tabbing down
+              a stack. On a phone the cell number drops to its own line. */}
+          <div className="name-row col-full">
+            <div className="field">
+              <label htmlFor="first_name">
+                First name <span className="opt">(optional)</span>
+              </label>
+              <input
+                id="first_name"
+                type="text"
+                placeholder="First name"
+                className={nameNa ? "is-na" : ""}
+                readOnly={nameNa}
+                value={values.first_name}
+                onChange={(e) => set("first_name", e.target.value)}
+              />
+              {errors.first_name && <span className="err">{errors.first_name}</span>}
+            </div>
+            <div className="field">
+              <label htmlFor="last_name">
+                Last name <span className="opt">(optional)</span>
+              </label>
+              <input
+                id="last_name"
+                type="text"
+                placeholder="Last name"
+                className={nameNa ? "is-na" : ""}
+                readOnly={nameNa}
+                value={values.last_name}
+                onChange={(e) => set("last_name", e.target.value)}
+              />
+              {errors.last_name && <span className="err">{errors.last_name}</span>}
+            </div>
+            <div className="field">
+              <label htmlFor="cell_number">
+                Cell number <span className="opt">(optional)</span>
+              </label>
+              <input
+                id="cell_number"
+                type="tel"
+                inputMode="tel"
+                placeholder="555-123-4567"
+                className={nameNa ? "is-na" : ""}
+                readOnly={nameNa}
+                value={values.cell_number}
+                onChange={(e) => set("cell_number", e.target.value)}
+                // Snap to 555-123-4567 as soon as they leave the field, so the
+                // stored format is visible at the door and not a save-time surprise.
+                onBlur={(e) => set("cell_number", normalizePhone(e.target.value))}
+              />
+              {errors.cell_number && <span className="err">{errors.cell_number}</span>}
+            </div>
           </div>
 
           <div className="field">
@@ -402,7 +419,7 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
           </div>
 
           <div className="field">
-            <label htmlFor="number_of_votes">Number of votes</label>
+            <label htmlFor="number_of_votes">Number of voters</label>
             <input
               id="number_of_votes"
               type="number"
@@ -410,10 +427,7 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
               step="1"
               className="field-narrow"
               value={values.number_of_votes}
-              onChange={(e) => {
-                setVotesEdited(true);
-                set("number_of_votes", e.target.value);
-              }}
+              onChange={(e) => setVotes(e.target.value)}
             />
             {errors.number_of_votes && <span className="err">{errors.number_of_votes}</span>}
           </div>
@@ -447,6 +461,25 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
               <span className="slider" />
             </span>
           </label>
+
+          {/* Email sits after the toggles: it isn't a column on the paper
+              tables and is rarely given, so it stays out of the tab path
+              through the fields that are filled in at every door. */}
+          <div className="field col-full">
+            <label htmlFor="email">
+              Email <span className="opt">(optional)</span>
+            </label>
+            <input
+              id="email"
+              type="email"
+              placeholder="name@example.com (optional)"
+              className={nameNa ? "is-na" : ""}
+              readOnly={nameNa}
+              value={values.email}
+              onChange={(e) => set("email", e.target.value)}
+            />
+            {errors.email && <span className="err">{errors.email}</span>}
+          </div>
 
           <div className="field col-full">
             <label htmlFor="comments">
@@ -505,12 +538,35 @@ export default function ResidentForm({ streets, recent, onSaved, online }) {
                   {r.unit_no ? ` · #${r.unit_no}` : ""}
                 </span>
                 <span className="r-votes">
-                  {r.number_of_votes} vote{r.number_of_votes === 1 ? "" : "s"}
+                  {r.number_of_votes} voter{r.number_of_votes === 1 ? "" : "s"}
                 </span>
+                {/* Fix a typo in the entry you just made without going to the
+                    Data page and hunting for the address. */}
+                <button
+                  type="button"
+                  className="btn btn-edit r-edit"
+                  disabled={!online}
+                  onClick={() => setEditing(r)}
+                >
+                  Edit
+                </button>
               </li>
             ))}
           </ul>
         </div>
+      )}
+
+      {editing && (
+        <EditResidentModal
+          resident={editing}
+          streets={streets}
+          onClose={() => setEditing(null)}
+          onSaved={(updated) => {
+            setEditing(null);
+            setFlash(`Saved changes to ${residentName(updated) || "the entry"}.`);
+            onSaved(); // pull the corrected row back into the list and the stats
+          }}
+        />
       )}
     </>
   );
