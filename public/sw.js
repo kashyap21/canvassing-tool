@@ -1,4 +1,4 @@
-const CACHE_NAME = "canvass-app-v2";
+const CACHE_NAME = "canvass-app-v3";
 
 self.addEventListener("install", (event) => {
   event.waitUntil(

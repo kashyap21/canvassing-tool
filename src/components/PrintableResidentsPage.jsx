@@ -10,6 +10,7 @@ const COLUMNS = [
   ["comments", "Comments"],
 ];
 
+const PAGE = 1000;
 const PRINT_SELECT = "street_number, street_name, unit_no, first_name, last_name, cell_number, comments";
 
 function withName(row) {
@@ -23,28 +24,28 @@ function withName(row) {
   };
 }
 
-function isMissingPrintableRpc(error) {
-  return (
-    error?.code === "PGRST202" ||
-    /printable_residents|schema cache|Could not find the function/i.test(error?.message || "")
-  );
-}
-
 async function fetchPrintableRows() {
-  const { data, error } = await supabase.rpc("printable_residents");
-  if (!error) return data || [];
-  if (!isMissingPrintableRpc(error)) throw error;
+  let from = 0;
+  const rows = [];
 
-  const fallback = await supabase
-    .from("residents")
-    .select(PRINT_SELECT)
-    .order("street_name", { ascending: true })
-    .order("street_number", { ascending: true })
-    .order("unit_no", { ascending: true })
-    .order("last_name", { ascending: true })
-    .order("first_name", { ascending: true });
-  if (fallback.error) throw fallback.error;
-  return (fallback.data || []).map(withName);
+  for (;;) {
+    const { data, error } = await supabase
+      .from("residents")
+      .select(PRINT_SELECT)
+      .order("street_name", { ascending: true })
+      .order("street_number", { ascending: true })
+      .order("unit_no", { ascending: true })
+      .order("last_name", { ascending: true })
+      .order("first_name", { ascending: true })
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+    from += PAGE;
+  }
+
+  return rows.map(withName);
 }
 
 export default function PrintableResidentsPage() {
